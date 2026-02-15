@@ -1,4 +1,4 @@
-package docker
+package sandbox
 
 import (
 	"bytes"
@@ -18,8 +18,8 @@ var (
 	instance *moby.Client
 )
 
-// Client returns the singleton Docker client.
-func Client() *moby.Client {
+// client returns the singleton Docker client.
+func client() *moby.Client {
 	once.Do(func() {
 		c, err := moby.NewClientWithOpts(moby.FromEnv, moby.WithAPIVersionNegotiation())
 		if err != nil {
@@ -30,33 +30,23 @@ func Client() *moby.Client {
 	return instance
 }
 
-// CreateResult holds the result of creating a container.
-type CreateResult struct {
-	ID    string            `json:"id"`
-	Ports map[string]string `json:"ports"` // "80/tcp": "32768"
-}
-
-// List returns all containers. Set all=true to include stopped ones.
+// List returns all sandboxes. Set all=true to include stopped ones.
 func List(ctx context.Context, all bool) ([]container.Summary, error) {
-	result, err := Client().ContainerList(ctx, moby.ContainerListOptions{All: all})
+	result, err := client().ContainerList(ctx, moby.ContainerListOptions{All: all})
 	if err != nil {
 		return nil, err
 	}
 	return result.Items, nil
 }
 
-// Create creates and starts a container. Docker assigns host ports automatically.
-// Returns the container ID and the assigned host ports.
-func Create(ctx context.Context, req models.CreateContainerRequest) (CreateResult, error) {
-	cli := Client()
-
-	// Build ExposedPorts so Docker knows which ports the container uses
-	exposedPorts := buildExposedPorts(req.Ports)
+// Create creates and starts a sandbox. Docker assigns host ports automatically.
+func Create(ctx context.Context, req models.CreateSandboxRequest) (models.CreateSandboxResponse, error) {
+	cli := client()
 
 	cfg := &container.Config{
 		Image:        req.Image,
 		Env:          req.Env,
-		ExposedPorts: exposedPorts,
+		ExposedPorts: buildExposedPorts(req.Ports),
 	}
 	if len(req.Cmd) > 0 {
 		cfg.Cmd = req.Cmd
@@ -65,58 +55,57 @@ func Create(ctx context.Context, req models.CreateContainerRequest) (CreateResul
 	result, err := cli.ContainerCreate(ctx, moby.ContainerCreateOptions{
 		Config: cfg,
 		HostConfig: &container.HostConfig{
-			// PublishAllPorts lets Docker pick available host ports automatically
 			PublishAllPorts: true,
 		},
 		Name: req.Name,
 	})
 	if err != nil {
-		return CreateResult{}, err
+		return models.CreateSandboxResponse{}, err
 	}
 
 	if _, err := cli.ContainerStart(ctx, result.ID, moby.ContainerStartOptions{}); err != nil {
-		return CreateResult{}, err
+		return models.CreateSandboxResponse{}, err
 	}
 
-	// Inspect to get the assigned host ports
+	// Inspect to get Docker-assigned host ports
 	info, err := cli.ContainerInspect(ctx, result.ID, moby.ContainerInspectOptions{})
 	if err != nil {
-		return CreateResult{}, err
+		return models.CreateSandboxResponse{}, err
 	}
 
-	return CreateResult{
+	return models.CreateSandboxResponse{
 		ID:    result.ID,
 		Ports: extractPorts(info.Container.NetworkSettings.Ports),
 	}, nil
 }
 
-// Inspect returns detailed info about a container.
+// Inspect returns detailed info about a sandbox.
 func Inspect(ctx context.Context, id string) (container.InspectResponse, error) {
-	result, err := Client().ContainerInspect(ctx, id, moby.ContainerInspectOptions{})
+	result, err := client().ContainerInspect(ctx, id, moby.ContainerInspectOptions{})
 	return result.Container, err
 }
 
-// Stop stops a running container.
+// Stop stops a running sandbox.
 func Stop(ctx context.Context, id string) error {
-	_, err := Client().ContainerStop(ctx, id, moby.ContainerStopOptions{})
+	_, err := client().ContainerStop(ctx, id, moby.ContainerStopOptions{})
 	return err
 }
 
-// Restart restarts a container.
+// Restart restarts a sandbox.
 func Restart(ctx context.Context, id string) error {
-	_, err := Client().ContainerRestart(ctx, id, moby.ContainerRestartOptions{})
+	_, err := client().ContainerRestart(ctx, id, moby.ContainerRestartOptions{})
 	return err
 }
 
-// Remove removes a container.
+// Remove removes a sandbox forcefully.
 func Remove(ctx context.Context, id string) error {
-	_, err := Client().ContainerRemove(ctx, id, moby.ContainerRemoveOptions{Force: true})
+	_, err := client().ContainerRemove(ctx, id, moby.ContainerRemoveOptions{Force: true})
 	return err
 }
 
-// Exec runs a command inside a container and returns the combined output.
+// Exec runs a command inside a sandbox and returns the combined stdout+stderr.
 func Exec(ctx context.Context, id string, cmd []string) (string, error) {
-	cli := Client()
+	cli := client()
 
 	execResult, err := cli.ExecCreate(ctx, id, moby.ExecCreateOptions{
 		AttachStdout: true,
