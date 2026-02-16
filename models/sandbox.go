@@ -24,3 +24,20 @@ type ExecRequest struct {
 type ExecResponse struct {
 	Output string `json:"output"`
 }
+
+// FileReadResponse is the response for GET /v1/sandboxes/:id/files
+type FileReadResponse struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+// FileWriteRequest is the body for PUT /v1/sandboxes/:id/files
+type FileWriteRequest struct {
+	Content string `json:"content" binding:"required"`
+}
+
+// FileListResponse is the response for GET /v1/sandboxes/:id/files/list
+type FileListResponse struct {
+	Path   string `json:"path"`
+	Output string `json:"output"`
+}

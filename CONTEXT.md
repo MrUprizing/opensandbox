@@ -53,6 +53,10 @@ Base URL: `http://localhost:8080/v1`
 | `POST` | `/v1/sandboxes/:id/stop` | Detener un sandbox |
 | `POST` | `/v1/sandboxes/:id/restart` | Reiniciar un sandbox |
 | `POST` | `/v1/sandboxes/:id/exec` | Ejecutar un comando dentro del sandbox |
+| `GET` | `/v1/sandboxes/:id/files` | Leer un archivo del sandbox |
+| `PUT` | `/v1/sandboxes/:id/files` | Escribir/crear un archivo en el sandbox |
+| `DELETE` | `/v1/sandboxes/:id/files` | Eliminar un archivo o directorio del sandbox |
+| `GET` | `/v1/sandboxes/:id/files/list` | Listar contenido de un directorio |
 
 ---
 
@@ -142,7 +146,61 @@ Otros comandos útiles para la demo:
 
 ---
 
-### 5. Detener el sandbox
+### 5. Leer un archivo del sandbox
+
+```bash
+curl "http://localhost:8080/v1/sandboxes/a3f8c2d1/files?path=/app/src/app/page.tsx"
+```
+
+```json
+{
+  "path": "/app/src/app/page.tsx",
+  "content": "import Image from \"next/image\";\n..."
+}
+```
+
+---
+
+### 6. Escribir un archivo en el sandbox
+
+```bash
+curl -X PUT "http://localhost:8080/v1/sandboxes/a3f8c2d1/files?path=/app/src/app/page.tsx" \
+  -H "Content-Type: application/json" \
+  -d '{ "content": "export default function Home() { return <h1>Hola Crafter</h1>; }" }'
+```
+
+```json
+{ "path": "/app/src/app/page.tsx", "status": "written" }
+```
+
+---
+
+### 7. Listar un directorio del sandbox
+
+```bash
+curl "http://localhost:8080/v1/sandboxes/a3f8c2d1/files/list?path=/app/src/app"
+```
+
+```json
+{
+  "path": "/app/src/app",
+  "output": "total 16\n-rw-r--r-- 1 root root 523 page.tsx\n-rw-r--r-- 1 root root 312 layout.tsx\n"
+}
+```
+
+---
+
+### 8. Eliminar un archivo del sandbox
+
+```bash
+curl -X DELETE "http://localhost:8080/v1/sandboxes/a3f8c2d1/files?path=/app/src/app/old-file.tsx"
+```
+
+`204 No Content`
+
+---
+
+### 9. Detener el sandbox
 
 ```bash
 curl -X POST http://localhost:8080/v1/sandboxes/a3f8c2d1/stop
@@ -154,7 +212,7 @@ curl -X POST http://localhost:8080/v1/sandboxes/a3f8c2d1/stop
 
 ---
 
-### 6. Reiniciar el sandbox
+### 10. Reiniciar el sandbox
 
 ```bash
 curl -X POST http://localhost:8080/v1/sandboxes/a3f8c2d1/restart
@@ -166,7 +224,7 @@ curl -X POST http://localhost:8080/v1/sandboxes/a3f8c2d1/restart
 
 ---
 
-### 7. Eliminar el sandbox
+### 11. Eliminar el sandbox
 
 ```bash
 curl -X DELETE http://localhost:8080/v1/sandboxes/a3f8c2d1

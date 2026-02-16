@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"strings"
 	"sync"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
@@ -105,9 +106,16 @@ func Remove(ctx context.Context, id string) error {
 
 // Exec runs a command inside a sandbox and returns the combined stdout+stderr.
 func Exec(ctx context.Context, id string, cmd []string) (string, error) {
+	return execWithStdin(ctx, id, cmd, nil)
+}
+
+// execWithStdin runs a command inside a sandbox with optional stdin input.
+func execWithStdin(ctx context.Context, id string, cmd []string, stdin io.Reader) (string, error) {
 	cli := client()
 
+	attachStdin := stdin != nil
 	execResult, err := cli.ExecCreate(ctx, id, moby.ExecCreateOptions{
+		AttachStdin:  attachStdin,
 		AttachStdout: true,
 		AttachStderr: true,
 		Cmd:          cmd,
@@ -122,12 +130,45 @@ func Exec(ctx context.Context, id string, cmd []string) (string, error) {
 	}
 	defer attached.Close()
 
+	if stdin != nil {
+		if _, err := io.Copy(attached.Conn, stdin); err != nil {
+			return "", err
+		}
+		attached.CloseWrite()
+	}
+
 	var stdout, stderr bytes.Buffer
 	if _, err := stdcopy.StdCopy(&stdout, &stderr, attached.Reader); err != nil && err != io.EOF {
 		return "", err
 	}
 
 	return stdout.String() + stderr.String(), nil
+}
+
+// ReadFile reads the content of a file inside a sandbox.
+func ReadFile(ctx context.Context, id, path string) (string, error) {
+	return Exec(ctx, id, []string{"cat", path})
+}
+
+// WriteFile writes content to a file inside a sandbox (creates parent dirs as needed).
+func WriteFile(ctx context.Context, id, path, content string) error {
+	// First ensure parent directory exists
+	if _, err := Exec(ctx, id, []string{"sh", "-c", "mkdir -p $(dirname '" + path + "')"}); err != nil {
+		return err
+	}
+	_, err := execWithStdin(ctx, id, []string{"sh", "-c", "cat > '" + path + "'"}, strings.NewReader(content))
+	return err
+}
+
+// DeleteFile deletes a file or directory inside a sandbox.
+func DeleteFile(ctx context.Context, id, path string) error {
+	_, err := Exec(ctx, id, []string{"rm", "-rf", path})
+	return err
+}
+
+// ListDir lists the contents of a directory inside a sandbox.
+func ListDir(ctx context.Context, id, path string) (string, error) {
+	return Exec(ctx, id, []string{"ls", "-la", path})
 }
 
 // buildExposedPorts converts ["80/tcp", "443/tcp"] to network.PortSet.

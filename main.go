@@ -29,6 +29,12 @@ func main() {
 		sb.POST("/:id/stop", handlers.StopSandbox)
 		sb.POST("/:id/restart", handlers.RestartSandbox)
 		sb.POST("/:id/exec", handlers.ExecSandbox)
+
+		// Filesystem endpoints
+		sb.GET("/:id/files", handlers.ReadFile)
+		sb.PUT("/:id/files", handlers.WriteFile)
+		sb.DELETE("/:id/files", handlers.DeleteFile)
+		sb.GET("/:id/files/list", handlers.ListDir)
 	}
 
 	r.Run(":8080")

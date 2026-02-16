@@ -105,3 +105,75 @@ func ExecSandbox(c *gin.Context) {
 
 	c.JSON(http.StatusOK, models.ExecResponse{Output: output})
 }
+
+// ReadFile handles GET /v1/sandboxes/:id/files?path=
+func ReadFile(c *gin.Context) {
+	id := c.Param("id")
+	path := c.Query("path")
+	if path == "" {
+		badRequest(c, "path query param is required")
+		return
+	}
+
+	content, err := sandbox.ReadFile(c.Request.Context(), id, path)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, models.FileReadResponse{Path: path, Content: content})
+}
+
+// WriteFile handles PUT /v1/sandboxes/:id/files?path=
+func WriteFile(c *gin.Context) {
+	id := c.Param("id")
+	path := c.Query("path")
+	if path == "" {
+		badRequest(c, "path query param is required")
+		return
+	}
+
+	var req models.FileWriteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		badRequest(c, err.Error())
+		return
+	}
+
+	if err := sandbox.WriteFile(c.Request.Context(), id, path, req.Content); err != nil {
+		internalError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"path": path, "status": "written"})
+}
+
+// DeleteFile handles DELETE /v1/sandboxes/:id/files?path=
+func DeleteFile(c *gin.Context) {
+	id := c.Param("id")
+	path := c.Query("path")
+	if path == "" {
+		badRequest(c, "path query param is required")
+		return
+	}
+
+	if err := sandbox.DeleteFile(c.Request.Context(), id, path); err != nil {
+		internalError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// ListDir handles GET /v1/sandboxes/:id/files/list?path=
+func ListDir(c *gin.Context) {
+	id := c.Param("id")
+	path := c.DefaultQuery("path", "/")
+
+	output, err := sandbox.ListDir(c.Request.Context(), id, path)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, models.FileListResponse{Path: path, Output: output})
+}

@@ -23,6 +23,10 @@ go run main.go
 | `POST` | `/v1/sandboxes/:id/stop` | Detener un sandbox |
 | `POST` | `/v1/sandboxes/:id/restart` | Reiniciar un sandbox |
 | `POST` | `/v1/sandboxes/:id/exec` | Ejecutar un comando dentro del sandbox |
+| `GET` | `/v1/sandboxes/:id/files` | Leer un archivo del sandbox |
+| `PUT` | `/v1/sandboxes/:id/files` | Escribir/crear un archivo en el sandbox |
+| `DELETE` | `/v1/sandboxes/:id/files` | Eliminar un archivo o directorio del sandbox |
+| `GET` | `/v1/sandboxes/:id/files/list` | Listar contenido de un directorio |
 
 ---
 
@@ -201,6 +205,93 @@ curl -X POST http://localhost:8080/v1/sandboxes/a3f8c2d1/exec \
 ```json
 {
   "output": "total 16\ndrwxr-xr-x 2 root root ...\n-rw-r--r-- 1 root root 497 index.html\n"
+}
+```
+
+---
+
+---
+
+### Leer archivo
+
+```
+GET /v1/sandboxes/:id/files?path=<ruta>
+```
+
+```bash
+curl "http://localhost:8080/v1/sandboxes/a3f8c2d1/files?path=/app/src/app/page.tsx"
+```
+
+**Response `200`**
+```json
+{
+  "path": "/app/src/app/page.tsx",
+  "content": "import Image from \"next/image\";\n..."
+}
+```
+
+---
+
+### Escribir archivo
+
+```
+PUT /v1/sandboxes/:id/files?path=<ruta>
+```
+
+Crea el archivo (y los directorios padre si no existen). Sobreescribe si ya existe.
+
+**Body**
+
+| Campo | Tipo | Requerido | Descripción |
+|-------|------|-----------|-------------|
+| `content` | string | si | Contenido del archivo |
+
+```bash
+curl -X PUT "http://localhost:8080/v1/sandboxes/a3f8c2d1/files?path=/app/src/app/page.tsx" \
+  -H "Content-Type: application/json" \
+  -d '{ "content": "export default function Home() { return <h1>Hello</h1>; }" }'
+```
+
+**Response `200`**
+```json
+{ "path": "/app/src/app/page.tsx", "status": "written" }
+```
+
+---
+
+### Eliminar archivo o directorio
+
+```
+DELETE /v1/sandboxes/:id/files?path=<ruta>
+```
+
+Elimina el archivo o directorio (recursivamente).
+
+```bash
+curl -X DELETE "http://localhost:8080/v1/sandboxes/a3f8c2d1/files?path=/app/src/app/old-file.tsx"
+```
+
+**Response `204 No Content`**
+
+---
+
+### Listar directorio
+
+```
+GET /v1/sandboxes/:id/files/list?path=<ruta>
+```
+
+`path` es opcional, por defecto `/`.
+
+```bash
+curl "http://localhost:8080/v1/sandboxes/a3f8c2d1/files/list?path=/app/src/app"
+```
+
+**Response `200`**
+```json
+{
+  "path": "/app/src/app",
+  "output": "total 16\n-rw-r--r-- 1 root root  523 page.tsx\n-rw-r--r-- 1 root root  312 layout.tsx\n"
 }
 ```
 
