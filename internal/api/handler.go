@@ -4,17 +4,16 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"open-sandbox/internal/docker"
 	"open-sandbox/models"
 )
 
 // Handler holds dependencies for all API handlers.
 type Handler struct {
-	docker *docker.Client
+	docker DockerClient
 }
 
 // New creates a Handler with the given Docker client.
-func New(d *docker.Client) *Handler {
+func New(d DockerClient) *Handler {
 	return &Handler{docker: d}
 }
 
