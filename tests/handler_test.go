@@ -238,3 +238,60 @@ func TestInternalError(t *testing.T) {
 	assert.Equal(t, 500, w.Code)
 	assert.Contains(t, w.Body.String(), "INTERNAL_ERROR")
 }
+
+func TestCreateSandbox_WithResourcesAndTimeout(t *testing.T) {
+	var captured models.CreateSandboxRequest
+	r := newRouter(&stub{
+		create: func(req models.CreateSandboxRequest) (models.CreateSandboxResponse, error) {
+			captured = req
+			return models.CreateSandboxResponse{ID: "abc123", Ports: map[string]string{"3000/tcp": "32768"}}, nil
+		},
+	})
+
+	w := do(r, "POST", "/v1/sandboxes", map[string]any{
+		"image":   "nextjs-docker:latest",
+		"timeout": 3600,
+		"resources": map[string]any{
+			"memory": 512,
+			"cpus":   1.5,
+		},
+	})
+	assert.Equal(t, 201, w.Code)
+	assert.Equal(t, 3600, captured.Timeout)
+	assert.NotNil(t, captured.Resources)
+	assert.Equal(t, int64(512), captured.Resources.Memory)
+	assert.Equal(t, 1.5, captured.Resources.CPUs)
+}
+
+func TestCreateSandbox_NegativeTimeout(t *testing.T) {
+	r := newRouter(&stub{})
+
+	w := do(r, "POST", "/v1/sandboxes", map[string]any{
+		"image":   "nextjs-docker:latest",
+		"timeout": -1,
+	})
+	assert.Equal(t, 400, w.Code)
+	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+}
+
+func TestCreateSandbox_NegativeMemory(t *testing.T) {
+	r := newRouter(&stub{})
+
+	w := do(r, "POST", "/v1/sandboxes", map[string]any{
+		"image":     "nextjs-docker:latest",
+		"resources": map[string]any{"memory": -1, "cpus": 1.0},
+	})
+	assert.Equal(t, 400, w.Code)
+	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+}
+
+func TestCreateSandbox_NegativeCPUs(t *testing.T) {
+	r := newRouter(&stub{})
+
+	w := do(r, "POST", "/v1/sandboxes", map[string]any{
+		"image":     "nextjs-docker:latest",
+		"resources": map[string]any{"memory": 512, "cpus": -0.5},
+	})
+	assert.Equal(t, 400, w.Code)
+	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+}

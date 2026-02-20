@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
@@ -47,6 +48,7 @@ func (c *Client) List(ctx context.Context, all bool) ([]container.Summary, error
 }
 
 // Create creates and starts a sandbox. Docker assigns host ports automatically.
+// Applies optional resource limits and schedules auto-stop if timeout > 0.
 func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (models.CreateSandboxResponse, error) {
 	cfg := &container.Config{
 		Image:        req.Image,
@@ -57,9 +59,18 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 		cfg.Cmd = req.Cmd
 	}
 
+	hostCfg := &container.HostConfig{PublishAllPorts: true}
+
+	if req.Resources != nil {
+		hostCfg.Resources = container.Resources{
+			Memory:   req.Resources.Memory * 1024 * 1024, // MB to bytes
+			NanoCPUs: int64(req.Resources.CPUs * 1e9),
+		}
+	}
+
 	result, err := c.cli.ContainerCreate(ctx, moby.ContainerCreateOptions{
 		Config:     cfg,
-		HostConfig: &container.HostConfig{PublishAllPorts: true},
+		HostConfig: hostCfg,
 		Name:       req.Name,
 	})
 	if err != nil {
@@ -68,6 +79,14 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 
 	if _, err := c.cli.ContainerStart(ctx, result.ID, moby.ContainerStartOptions{}); err != nil {
 		return models.CreateSandboxResponse{}, err
+	}
+
+	// Schedule auto-stop after timeout seconds.
+	if req.Timeout > 0 {
+		go func() {
+			<-time.After(time.Duration(req.Timeout) * time.Second)
+			c.Stop(context.Background(), result.ID)
+		}()
 	}
 
 	// Inspect to get Docker-assigned host ports.

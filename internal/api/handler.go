@@ -40,6 +40,21 @@ func (h *Handler) createSandbox(c *gin.Context) {
 		return
 	}
 
+	if req.Timeout < 0 {
+		badRequest(c, "timeout must be >= 0")
+		return
+	}
+	if req.Resources != nil {
+		if req.Resources.Memory < 0 {
+			badRequest(c, "resources.memory must be >= 0")
+			return
+		}
+		if req.Resources.CPUs < 0 {
+			badRequest(c, "resources.cpus must be >= 0")
+			return
+		}
+	}
+
 	result, err := h.docker.Create(c.Request.Context(), req)
 	if err != nil {
 		internalError(c, err)
