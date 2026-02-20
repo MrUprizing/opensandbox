@@ -115,6 +115,27 @@ info:
   title: Open Sandbox API
   version: "1.0"
 paths:
+  /health:
+    get:
+      description: Returns the health status of the API and its Docker daemon connection.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: healthy'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: 'status: unhealthy'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health check
+      tags:
+      - system
   /sandboxes:
     get:
       description: List all active sandboxes. Use ?all=true to include stopped containers.

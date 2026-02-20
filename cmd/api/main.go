@@ -44,6 +44,7 @@ func main() {
 	}
 
 	h := api.New(docker.New())
+	h.RegisterHealthCheck(r)
 	h.RegisterRoutes(v1)
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerfiles.Handler))

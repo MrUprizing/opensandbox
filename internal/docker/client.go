@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
@@ -40,6 +41,12 @@ func New() *Client {
 		instance = &Client{cli: cli}
 	})
 	return instance
+}
+
+// Ping checks connectivity with the Docker daemon.
+func (c *Client) Ping(ctx context.Context) error {
+	_, err := c.cli.Ping(ctx, moby.PingOptions{})
+	return err
 }
 
 // List returns all sandboxes. Set all=true to include stopped ones.
@@ -239,12 +246,12 @@ func (c *Client) cancelTimer(id string) {
 	}
 }
 
-// wrapNotFound converts Docker "No such container" errors to ErrNotFound.
+// wrapNotFound converts Docker "not found" errors to ErrNotFound.
 func wrapNotFound(err error) error {
 	if err == nil {
 		return nil
 	}
-	if strings.Contains(err.Error(), "No such container") {
+	if errdefs.IsNotFound(err) {
 		return ErrNotFound
 	}
 	return err

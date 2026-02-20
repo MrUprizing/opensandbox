@@ -17,6 +17,25 @@ func New(d DockerClient) *Handler {
 	return &Handler{docker: d}
 }
 
+// healthCheck handles GET /health.
+// @Summary      Health check
+// @Description  Returns the health status of the API and its Docker daemon connection.
+// @Tags         system
+// @Produce      json
+// @Success      200  {object}  map[string]string  "status: healthy"
+// @Failure      503  {object}  map[string]string  "status: unhealthy"
+// @Router       /health [get]
+func (h *Handler) healthCheck(c *gin.Context) {
+	if err := h.docker.Ping(c.Request.Context()); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status": "unhealthy",
+			"error":  err.Error(),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "healthy"})
+}
+
 // listSandboxes handles GET /v1/sandboxes.
 // @Summary      List sandboxes
 // @Description  List all active sandboxes. Use ?all=true to include stopped containers.

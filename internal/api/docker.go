@@ -9,6 +9,7 @@ import (
 
 // DockerClient defines the sandbox operations used by the API handlers.
 type DockerClient interface {
+	Ping(ctx context.Context) error
 	List(ctx context.Context, all bool) ([]container.Summary, error)
 	Create(ctx context.Context, req models.CreateSandboxRequest) (models.CreateSandboxResponse, error)
 	Inspect(ctx context.Context, id string) (container.InspectResponse, error)

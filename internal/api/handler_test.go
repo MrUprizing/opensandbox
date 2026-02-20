@@ -1,4 +1,4 @@
-package apitest
+package api_test
 
 import (
 	"bytes"
@@ -23,6 +23,7 @@ func init() { gin.SetMode(gin.TestMode) }
 // Each field is an optional function — set only what the test needs, leave the rest nil.
 // If a nil method is called unexpectedly the test will panic, making the gap obvious.
 type stub struct {
+	ping            func() error
 	list            func(bool) ([]container.Summary, error)
 	create          func(models.CreateSandboxRequest) (models.CreateSandboxResponse, error)
 	inspect         func(string) (container.InspectResponse, error)
@@ -39,6 +40,12 @@ type stub struct {
 	listDir         func(string, string) (string, error)
 }
 
+func (s *stub) Ping(_ context.Context) error {
+	if s.ping != nil {
+		return s.ping()
+	}
+	return nil
+}
 func (s *stub) List(_ context.Context, all bool) ([]container.Summary, error) {
 	return s.list(all)
 }
@@ -73,16 +80,20 @@ func (s *stub) ListDir(_ context.Context, id, path string) (string, error) {
 // newRouter builds a Gin engine with all sandbox routes registered for the given client.
 func newRouter(d api.DockerClient) *gin.Engine {
 	r := gin.New()
-	api.New(d).RegisterRoutes(r.Group("/v1"))
+	h := api.New(d)
+	h.RegisterHealthCheck(r)
+	h.RegisterRoutes(r.Group("/v1"))
 	return r
 }
 
 // newAuthRouter builds a Gin engine with API key auth enabled on /v1.
 func newAuthRouter(d api.DockerClient, key string) *gin.Engine {
 	r := gin.New()
+	h := api.New(d)
+	h.RegisterHealthCheck(r)
 	v1 := r.Group("/v1")
 	v1.Use(api.APIKeyAuth(key))
-	api.New(d).RegisterRoutes(v1)
+	h.RegisterRoutes(v1)
 	return r
 }
 
@@ -468,4 +479,38 @@ func TestNoAuth_WorksWithoutMiddleware(t *testing.T) {
 	w := do(r, "GET", "/v1/sandboxes", nil)
 	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), "abc123")
+}
+
+// ── Health Check Tests ──────────────────────────────────────────────────────
+
+func TestHealthCheck_Healthy(t *testing.T) {
+	r := newRouter(&stub{
+		ping: func() error { return nil },
+	})
+
+	w := do(r, "GET", "/health", nil)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "healthy")
+}
+
+func TestHealthCheck_Unhealthy(t *testing.T) {
+	r := newRouter(&stub{
+		ping: func() error { return errors.New("daemon unreachable") },
+	})
+
+	w := do(r, "GET", "/health", nil)
+	assert.Equal(t, 503, w.Code)
+	assert.Contains(t, w.Body.String(), "unhealthy")
+	assert.Contains(t, w.Body.String(), "daemon unreachable")
+}
+
+func TestHealthCheck_NoAuthRequired(t *testing.T) {
+	r := newAuthRouter(&stub{
+		ping: func() error { return nil },
+	}, "sk-test-123")
+
+	// Health check should work without auth header.
+	w := do(r, "GET", "/health", nil)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "healthy")
 }
