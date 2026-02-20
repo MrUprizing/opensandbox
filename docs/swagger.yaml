@@ -135,6 +135,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: List sandboxes
       tags:
       - sandboxes
@@ -165,6 +167,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: Create a sandbox
       tags:
       - sandboxes
@@ -188,6 +192,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: Delete a sandbox
       tags:
       - sandboxes
@@ -215,6 +221,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: Inspect a sandbox
       tags:
       - sandboxes
@@ -255,6 +263,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: Execute a command
       tags:
       - sandboxes
@@ -287,6 +297,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: Delete a file
       tags:
       - files
@@ -322,6 +334,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: Read a file
       tags:
       - files
@@ -368,6 +382,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: Write a file
       tags:
       - files
@@ -400,6 +416,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: List a directory
       tags:
       - files
@@ -429,6 +447,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: Pause a sandbox
       tags:
       - sandboxes
@@ -468,6 +488,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: Renew sandbox expiration
       tags:
       - sandboxes
@@ -497,6 +519,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: Restart a sandbox
       tags:
       - sandboxes
@@ -526,6 +550,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: Resume a sandbox
       tags:
       - sandboxes
@@ -555,7 +581,15 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: Stop a sandbox
       tags:
       - sandboxes
+securityDefinitions:
+  ApiKeyAuth:
+    description: Enter "Bearer {your-api-key}"
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"

@@ -17,6 +17,11 @@ const docTemplate = `{
     "paths": {
         "/sandboxes": {
             "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "List all active sandboxes. Use ?all=true to include stopped containers.",
                 "produces": [
                     "application/json"
@@ -50,6 +55,11 @@ const docTemplate = `{
                 }
             },
             "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Create and start a new Docker container. Returns its ID and assigned host ports.",
                 "consumes": [
                     "application/json"
@@ -96,6 +106,11 @@ const docTemplate = `{
         },
         "/sandboxes/{id}": {
             "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Returns full Docker inspect data for the sandbox.",
                 "produces": [
                     "application/json"
@@ -136,6 +151,11 @@ const docTemplate = `{
                 }
             },
             "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Force-remove a sandbox regardless of its state.",
                 "tags": [
                     "sandboxes"
@@ -171,6 +191,11 @@ const docTemplate = `{
         },
         "/sandboxes/{id}/exec": {
             "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Run an arbitrary command inside the sandbox and return combined stdout+stderr.",
                 "consumes": [
                     "application/json"
@@ -230,6 +255,11 @@ const docTemplate = `{
         },
         "/sandboxes/{id}/files": {
             "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Returns the content of a file at the given path inside the sandbox.",
                 "produces": [
                     "application/json"
@@ -282,6 +312,11 @@ const docTemplate = `{
                 }
             },
             "put": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Write or overwrite a file inside the sandbox. Creates parent directories as needed.",
                 "consumes": [
                     "application/json"
@@ -349,6 +384,11 @@ const docTemplate = `{
                 }
             },
             "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Remove a file or directory (recursive) inside the sandbox.",
                 "tags": [
                     "files"
@@ -397,6 +437,11 @@ const docTemplate = `{
         },
         "/sandboxes/{id}/files/list": {
             "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Returns the output of ls -la for the given directory. Defaults to root (/).",
                 "produces": [
                     "application/json"
@@ -444,6 +489,11 @@ const docTemplate = `{
         },
         "/sandboxes/{id}/pause": {
             "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Freeze all processes inside the sandbox.",
                 "produces": [
                     "application/json"
@@ -488,6 +538,11 @@ const docTemplate = `{
         },
         "/sandboxes/{id}/renew-expiration": {
             "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Reset the auto-stop timer for a sandbox.",
                 "consumes": [
                     "application/json"
@@ -547,6 +602,11 @@ const docTemplate = `{
         },
         "/sandboxes/{id}/restart": {
             "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Restart a sandbox (stop + start).",
                 "produces": [
                     "application/json"
@@ -591,6 +651,11 @@ const docTemplate = `{
         },
         "/sandboxes/{id}/resume": {
             "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Resume a paused sandbox.",
                 "produces": [
                     "application/json"
@@ -635,6 +700,11 @@ const docTemplate = `{
         },
         "/sandboxes/{id}/stop": {
             "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Gracefully stop a running sandbox.",
                 "produces": [
                     "application/json"
@@ -842,6 +912,14 @@ const docTemplate = `{
                     "type": "integer"
                 }
             }
+        }
+    },
+    "securityDefinitions": {
+        "ApiKeyAuth": {
+            "description": "Enter \"Bearer {your-api-key}\"",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
         }
     }
 }`

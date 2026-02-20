@@ -20,6 +20,11 @@ import (
 // @host      localhost:8080
 // @BasePath  /v1
 
+// @securityDefinitions.apikey  ApiKeyAuth
+// @in                          header
+// @name                        Authorization
+// @description                 Enter "Bearer {your-api-key}"
+
 func main() {
 	cfg := config.Load()
 
@@ -33,8 +38,13 @@ func main() {
 		})
 	})
 
+	v1 := r.Group("/v1")
+	if cfg.APIKey != "" {
+		v1.Use(api.APIKeyAuth(cfg.APIKey))
+	}
+
 	h := api.New(docker.New())
-	h.RegisterRoutes(r.Group("/v1"))
+	h.RegisterRoutes(v1)
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerfiles.Handler))
 

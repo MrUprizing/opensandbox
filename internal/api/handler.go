@@ -25,6 +25,7 @@ func New(d DockerClient) *Handler {
 // @Param        all  query  bool  false  "Include stopped containers"
 // @Success      200  {object}  map[string]interface{}  "List of sandboxes"
 // @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
 // @Router       /sandboxes [get]
 func (h *Handler) listSandboxes(c *gin.Context) {
 	all := c.Query("all") == "true"
@@ -48,6 +49,7 @@ func (h *Handler) listSandboxes(c *gin.Context) {
 // @Success      201   {object}  models.CreateSandboxResponse
 // @Failure      400   {object}  ErrorResponse
 // @Failure      500   {object}  ErrorResponse
+// @Security     ApiKeyAuth
 // @Router       /sandboxes [post]
 func (h *Handler) createSandbox(c *gin.Context) {
 	var req models.CreateSandboxRequest
@@ -89,6 +91,7 @@ func (h *Handler) createSandbox(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "Docker inspect response"
 // @Failure      404  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
 // @Router       /sandboxes/{id} [get]
 func (h *Handler) getSandbox(c *gin.Context) {
 	info, err := h.docker.Inspect(c.Request.Context(), c.Param("id"))
@@ -109,6 +112,7 @@ func (h *Handler) getSandbox(c *gin.Context) {
 // @Success      200  {object}  map[string]string  "status: stopped"
 // @Failure      404  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
 // @Router       /sandboxes/{id}/stop [post]
 func (h *Handler) stopSandbox(c *gin.Context) {
 	if err := h.docker.Stop(c.Request.Context(), c.Param("id")); err != nil {
@@ -128,6 +132,7 @@ func (h *Handler) stopSandbox(c *gin.Context) {
 // @Success      200  {object}  map[string]string  "status: restarted"
 // @Failure      404  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
 // @Router       /sandboxes/{id}/restart [post]
 func (h *Handler) restartSandbox(c *gin.Context) {
 	if err := h.docker.Restart(c.Request.Context(), c.Param("id")); err != nil {
@@ -146,6 +151,7 @@ func (h *Handler) restartSandbox(c *gin.Context) {
 // @Success      204  "No Content"
 // @Failure      404  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
 // @Router       /sandboxes/{id} [delete]
 func (h *Handler) deleteSandbox(c *gin.Context) {
 	if err := h.docker.Remove(c.Request.Context(), c.Param("id")); err != nil {
@@ -168,6 +174,7 @@ func (h *Handler) deleteSandbox(c *gin.Context) {
 // @Failure      400   {object}  ErrorResponse
 // @Failure      404   {object}  ErrorResponse
 // @Failure      500   {object}  ErrorResponse
+// @Security     ApiKeyAuth
 // @Router       /sandboxes/{id}/exec [post]
 func (h *Handler) execSandbox(c *gin.Context) {
 	var req models.ExecRequest
@@ -196,6 +203,7 @@ func (h *Handler) execSandbox(c *gin.Context) {
 // @Failure      400   {object}  ErrorResponse
 // @Failure      404   {object}  ErrorResponse
 // @Failure      500   {object}  ErrorResponse
+// @Security     ApiKeyAuth
 // @Router       /sandboxes/{id}/files [get]
 func (h *Handler) readFile(c *gin.Context) {
 	path := c.Query("path")
@@ -226,6 +234,7 @@ func (h *Handler) readFile(c *gin.Context) {
 // @Failure      400   {object}  ErrorResponse
 // @Failure      404   {object}  ErrorResponse
 // @Failure      500   {object}  ErrorResponse
+// @Security     ApiKeyAuth
 // @Router       /sandboxes/{id}/files [put]
 func (h *Handler) writeFile(c *gin.Context) {
 	path := c.Query("path")
@@ -258,6 +267,7 @@ func (h *Handler) writeFile(c *gin.Context) {
 // @Failure      400   {object}  ErrorResponse
 // @Failure      404   {object}  ErrorResponse
 // @Failure      500   {object}  ErrorResponse
+// @Security     ApiKeyAuth
 // @Router       /sandboxes/{id}/files [delete]
 func (h *Handler) deleteFile(c *gin.Context) {
 	path := c.Query("path")
@@ -284,6 +294,7 @@ func (h *Handler) deleteFile(c *gin.Context) {
 // @Success      200   {object}  models.FileListResponse
 // @Failure      404   {object}  ErrorResponse
 // @Failure      500   {object}  ErrorResponse
+// @Security     ApiKeyAuth
 // @Router       /sandboxes/{id}/files/list [get]
 func (h *Handler) listDir(c *gin.Context) {
 	path := c.DefaultQuery("path", "/")
@@ -306,6 +317,7 @@ func (h *Handler) listDir(c *gin.Context) {
 // @Success      200  {object}  map[string]string  "status: paused"
 // @Failure      404  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
 // @Router       /sandboxes/{id}/pause [post]
 func (h *Handler) pauseSandbox(c *gin.Context) {
 	if err := h.docker.Pause(c.Request.Context(), c.Param("id")); err != nil {
@@ -325,6 +337,7 @@ func (h *Handler) pauseSandbox(c *gin.Context) {
 // @Success      200  {object}  map[string]string  "status: resumed"
 // @Failure      404  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
 // @Router       /sandboxes/{id}/resume [post]
 func (h *Handler) resumeSandbox(c *gin.Context) {
 	if err := h.docker.Resume(c.Request.Context(), c.Param("id")); err != nil {
@@ -347,6 +360,7 @@ func (h *Handler) resumeSandbox(c *gin.Context) {
 // @Failure      400   {object}  ErrorResponse
 // @Failure      404   {object}  ErrorResponse
 // @Failure      500   {object}  ErrorResponse
+// @Security     ApiKeyAuth
 // @Router       /sandboxes/{id}/renew-expiration [post]
 func (h *Handler) renewExpiration(c *gin.Context) {
 	var req models.RenewExpirationRequest

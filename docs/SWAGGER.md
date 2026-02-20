@@ -14,6 +14,12 @@ go install github.com/swaggo/swag/cmd/swag@latest
 swag init -g ./cmd/api/main.go -o docs --parseDependency --parseInternal
 ```
 
+## Generate docs manually
+
+```bash
+/Users/uprizing/go/bin/swag init -g ./cmd/api/main.go -o docs --parseDependency --parseInternal
+```
+
 Run this every time you modify `@Summary`, `@Param`, `@Success`, etc. annotations in the handlers.
 
 ## Access

@@ -7,7 +7,8 @@ import (
 
 // Config holds all application configuration.
 type Config struct {
-	Addr string // HTTP listen address, e.g. ":8080"
+	Addr   string // HTTP listen address, e.g. ":8080"
+	APIKey string // API key for authentication (env API_KEY). Empty = auth disabled.
 }
 
 // Load parses flags and env vars. Flags take precedence over env vars.
@@ -16,7 +17,8 @@ func Load() *Config {
 	flag.Parse()
 
 	return &Config{
-		Addr: *addr,
+		Addr:   *addr,
+		APIKey: os.Getenv("API_KEY"),
 	}
 }
 

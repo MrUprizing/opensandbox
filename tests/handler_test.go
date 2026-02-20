@@ -77,6 +77,15 @@ func newRouter(d api.DockerClient) *gin.Engine {
 	return r
 }
 
+// newAuthRouter builds a Gin engine with API key auth enabled on /v1.
+func newAuthRouter(d api.DockerClient, key string) *gin.Engine {
+	r := gin.New()
+	v1 := r.Group("/v1")
+	v1.Use(api.APIKeyAuth(key))
+	api.New(d).RegisterRoutes(v1)
+	return r
+}
+
 // do fires an HTTP request against the router and returns the recorded response.
 // body is JSON-encoded when non-nil.
 func do(r *gin.Engine, method, url string, body any) *httptest.ResponseRecorder {
@@ -86,6 +95,20 @@ func do(r *gin.Engine, method, url string, body any) *httptest.ResponseRecorder 
 	}
 	req, _ := http.NewRequest(method, url, &b)
 	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+// doWithAuth fires an HTTP request with a Bearer token.
+func doWithAuth(r *gin.Engine, method, url string, body any, token string) *httptest.ResponseRecorder {
+	var b bytes.Buffer
+	if body != nil {
+		json.NewEncoder(&b).Encode(body)
+	}
+	req, _ := http.NewRequest(method, url, &b)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	return w
@@ -395,4 +418,54 @@ func TestRenewExpiration_ZeroTimeout(t *testing.T) {
 	w := do(r, "POST", "/v1/sandboxes/abc123/renew-expiration", map[string]any{"timeout": 0})
 	assert.Equal(t, 400, w.Code)
 	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+}
+
+// ── API Key Auth Tests ──────────────────────────────────────────────────────
+
+func TestApiKeyAuth_NoHeader(t *testing.T) {
+	r := newAuthRouter(&stub{
+		list: func(bool) ([]container.Summary, error) {
+			return []container.Summary{}, nil
+		},
+	}, "sk-test-123")
+
+	w := do(r, "GET", "/v1/sandboxes", nil)
+	assert.Equal(t, 401, w.Code)
+	assert.Contains(t, w.Body.String(), "UNAUTHORIZED")
+}
+
+func TestApiKeyAuth_WrongKey(t *testing.T) {
+	r := newAuthRouter(&stub{
+		list: func(bool) ([]container.Summary, error) {
+			return []container.Summary{}, nil
+		},
+	}, "sk-test-123")
+
+	w := doWithAuth(r, "GET", "/v1/sandboxes", nil, "sk-wrong")
+	assert.Equal(t, 401, w.Code)
+	assert.Contains(t, w.Body.String(), "UNAUTHORIZED")
+}
+
+func TestApiKeyAuth_CorrectKey(t *testing.T) {
+	r := newAuthRouter(&stub{
+		list: func(bool) ([]container.Summary, error) {
+			return []container.Summary{{ID: "abc123"}}, nil
+		},
+	}, "sk-test-123")
+
+	w := doWithAuth(r, "GET", "/v1/sandboxes", nil, "sk-test-123")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "abc123")
+}
+
+func TestNoAuth_WorksWithoutMiddleware(t *testing.T) {
+	r := newRouter(&stub{
+		list: func(bool) ([]container.Summary, error) {
+			return []container.Summary{{ID: "abc123"}}, nil
+		},
+	})
+
+	w := do(r, "GET", "/v1/sandboxes", nil)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "abc123")
 }
