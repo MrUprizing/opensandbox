@@ -30,7 +30,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 
 	// 1. Create a sandbox using a lightweight image.
 	w := do(r, "POST", "/v1/sandboxes", map[string]any{
-		"image":   "alpine:latest",
+		"image":   "nextjs-docker:latest",
 		"cmd":     []string{"sleep", "300"},
 		"timeout": 60,
 	})
@@ -141,4 +141,41 @@ func TestIntegration_NotFound(t *testing.T) {
 		w := do(r, e.method, e.url, e.body)
 		assert.Equal(t, http.StatusNotFound, w.Code, "%s %s should return 404", e.method, e.url)
 	}
+}
+
+func TestIntegration_DefaultResourceLimits(t *testing.T) {
+	r := realRouter()
+
+	// Create a sandbox without specifying resource limits
+	w := do(r, "POST", "/v1/sandboxes", map[string]any{
+		"image":   "nextjs-docker:latest",
+		"cmd":     []string{"sleep", "60"},
+		"timeout": 60,
+	})
+	require.Equal(t, http.StatusCreated, w.Code, "create should return 201: %s", w.Body.String())
+
+	var created models.CreateSandboxResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
+	require.NotEmpty(t, created.ID)
+	id := created.ID
+
+	defer func() {
+		do(r, "DELETE", "/v1/sandboxes/"+id, nil)
+	}()
+
+	// Inspect the sandbox to verify default resource limits
+	w = do(r, "GET", "/v1/sandboxes/"+id, nil)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var inspect map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &inspect))
+
+	// Verify HostConfig.Memory = 1GB (1024 * 1024 * 1024 bytes)
+	hostConfig := inspect["HostConfig"].(map[string]any)
+	memory := int64(hostConfig["Memory"].(float64))
+	assert.Equal(t, int64(1024*1024*1024), memory, "Default memory should be 1GB")
+
+	// Verify HostConfig.NanoCpus = 1 CPU (1e9 nanocpus)
+	nanoCPUs := int64(hostConfig["NanoCpus"].(float64))
+	assert.Equal(t, int64(1e9), nanoCPUs, "Default CPUs should be 1 vCPU")
 }

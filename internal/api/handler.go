@@ -86,8 +86,16 @@ func (h *Handler) createSandbox(c *gin.Context) {
 			badRequest(c, "resources.memory must be >= 0")
 			return
 		}
+		if req.Resources.Memory > 8192 {
+			badRequest(c, "resources.memory must be <= 8192 (8GB)")
+			return
+		}
 		if req.Resources.CPUs < 0 {
 			badRequest(c, "resources.cpus must be >= 0")
+			return
+		}
+		if req.Resources.CPUs > 4.0 {
+			badRequest(c, "resources.cpus must be <= 4.0")
 			return
 		}
 	}

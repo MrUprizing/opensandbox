@@ -338,6 +338,48 @@ func TestCreateSandbox_NegativeCPUs(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
 }
 
+func TestCreateSandbox_ExceedsMaxMemory(t *testing.T) {
+	r := newRouter(&stub{})
+
+	w := do(r, "POST", "/v1/sandboxes", map[string]any{
+		"image":     "nextjs-docker:latest",
+		"resources": map[string]any{"memory": 9000, "cpus": 1.0},
+	})
+	assert.Equal(t, 400, w.Code)
+	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+	assert.Contains(t, w.Body.String(), "8192")
+}
+
+func TestCreateSandbox_ExceedsMaxCPUs(t *testing.T) {
+	r := newRouter(&stub{})
+
+	w := do(r, "POST", "/v1/sandboxes", map[string]any{
+		"image":     "nextjs-docker:latest",
+		"resources": map[string]any{"memory": 1024, "cpus": 5.0},
+	})
+	assert.Equal(t, 400, w.Code)
+	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+	assert.Contains(t, w.Body.String(), "4.0")
+}
+
+func TestCreateSandbox_DefaultResources(t *testing.T) {
+	var captured models.CreateSandboxRequest
+	r := newRouter(&stub{
+		create: func(req models.CreateSandboxRequest) (models.CreateSandboxResponse, error) {
+			captured = req
+			return models.CreateSandboxResponse{ID: "test123"}, nil
+		},
+	})
+
+	// Create without specifying resources
+	w := do(r, "POST", "/v1/sandboxes", map[string]any{
+		"image": "nextjs-docker:latest",
+	})
+	assert.Equal(t, 201, w.Code)
+	// Resources should be nil in the request (defaults applied in Docker client)
+	assert.Nil(t, captured.Resources)
+}
+
 func TestPauseSandbox(t *testing.T) {
 	r := newRouter(&stub{
 		pause: func(string) error { return nil },

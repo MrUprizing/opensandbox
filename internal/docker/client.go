@@ -25,6 +25,18 @@ type Client struct {
 // defaultTimeout is applied when no timeout is specified (15 minutes).
 const defaultTimeout = 900
 
+// Default resource limits (1 vCPU, 1GB RAM)
+const (
+	defaultMemoryMB = 1024 // 1GB
+	defaultCPUs     = 1.0  // 1 vCPU
+)
+
+// Maximum resource limits (4 vCPU, 8GB RAM)
+const (
+	maxMemoryMB = 8192 // 8GB
+	maxCPUs     = 4.0  // 4 vCPU
+)
+
 var (
 	once     sync.Once
 	instance *Client
@@ -72,11 +84,20 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 
 	hostCfg := &container.HostConfig{PublishAllPorts: true}
 
+	// Apply resource limits (defaults: 1GB RAM, 1 vCPU)
+	memory := int64(defaultMemoryMB)
+	cpus := defaultCPUs
 	if req.Resources != nil {
-		hostCfg.Resources = container.Resources{
-			Memory:   req.Resources.Memory * 1024 * 1024, // MB to bytes
-			NanoCPUs: int64(req.Resources.CPUs * 1e9),
+		if req.Resources.Memory > 0 {
+			memory = req.Resources.Memory
 		}
+		if req.Resources.CPUs > 0 {
+			cpus = req.Resources.CPUs
+		}
+	}
+	hostCfg.Resources = container.Resources{
+		Memory:   memory * 1024 * 1024, // MB to bytes
+		NanoCPUs: int64(cpus * 1e9),
 	}
 
 	result, err := c.cli.ContainerCreate(ctx, moby.ContainerCreateOptions{
@@ -204,7 +225,7 @@ func (c *Client) execWithStdin(ctx context.Context, id string, cmd []string, std
 		Cmd:          cmd,
 	})
 	if err != nil {
-		return "", err
+		return "", wrapNotFound(err)
 	}
 
 	attached, err := c.cli.ExecAttach(ctx, execResult.ID, moby.ExecAttachOptions{})

@@ -2,8 +2,8 @@ package models
 
 // ResourceLimits defines CPU and memory constraints for a sandbox.
 type ResourceLimits struct {
-	Memory int64   `json:"memory"` // memory limit in MB (e.g. 512 = 512MB)
-	CPUs   float64 `json:"cpus"`   // fractional CPU limit (e.g. 1.5)
+	Memory int64   `json:"memory"` // memory limit in MB (e.g. 512 = 512MB). Default: 1024 (1GB), Max: 8192 (8GB)
+	CPUs   float64 `json:"cpus"`   // fractional CPU limit (e.g. 1.5). Default: 1.0, Max: 4.0
 }
 
 // CreateSandboxRequest is the body for POST /v1/sandboxes
@@ -14,7 +14,7 @@ type CreateSandboxRequest struct {
 	Cmd       []string        `json:"cmd"`
 	Ports     []string        `json:"ports"`     // container ports to expose: ["80/tcp", "443/tcp"]
 	Timeout   int             `json:"timeout"`   // seconds until auto-stop, 0 = default (900s)
-	Resources *ResourceLimits `json:"resources"` // CPU/memory limits, nil = no limits
+	Resources *ResourceLimits `json:"resources"` // CPU/memory limits, nil = defaults (1GB RAM, 1 vCPU)
 }
 
 // CreateSandboxResponse is the response for POST /v1/sandboxes
