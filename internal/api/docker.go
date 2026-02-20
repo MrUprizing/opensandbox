@@ -15,6 +15,9 @@ type DockerClient interface {
 	Stop(ctx context.Context, id string) error
 	Restart(ctx context.Context, id string) error
 	Remove(ctx context.Context, id string) error
+	Pause(ctx context.Context, id string) error
+	Resume(ctx context.Context, id string) error
+	RenewExpiration(ctx context.Context, id string, timeout int) error
 	Exec(ctx context.Context, id string, cmd []string) (string, error)
 	ReadFile(ctx context.Context, id, path string) (string, error)
 	WriteFile(ctx context.Context, id, path, content string) error

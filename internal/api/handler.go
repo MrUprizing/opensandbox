@@ -198,3 +198,47 @@ func (h *Handler) listDir(c *gin.Context) {
 
 	c.JSON(http.StatusOK, models.FileListResponse{Path: path, Output: output})
 }
+
+// pauseSandbox handles POST /v1/sandboxes/:id/pause.
+// Freezes all processes inside the sandbox.
+func (h *Handler) pauseSandbox(c *gin.Context) {
+	if err := h.docker.Pause(c.Request.Context(), c.Param("id")); err != nil {
+		internalError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "paused"})
+}
+
+// resumeSandbox handles POST /v1/sandboxes/:id/resume.
+// Resumes a paused sandbox.
+func (h *Handler) resumeSandbox(c *gin.Context) {
+	if err := h.docker.Resume(c.Request.Context(), c.Param("id")); err != nil {
+		internalError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "resumed"})
+}
+
+// renewExpiration handles POST /v1/sandboxes/:id/renew-expiration.
+// Resets the auto-stop timer for a sandbox.
+func (h *Handler) renewExpiration(c *gin.Context) {
+	var req models.RenewExpirationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		badRequest(c, err.Error())
+		return
+	}
+
+	if req.Timeout <= 0 {
+		badRequest(c, "timeout must be > 0")
+		return
+	}
+
+	if err := h.docker.RenewExpiration(c.Request.Context(), c.Param("id"), req.Timeout); err != nil {
+		internalError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, models.RenewExpirationResponse{Status: "renewed", Timeout: req.Timeout})
+}

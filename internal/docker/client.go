@@ -17,8 +17,12 @@ import (
 
 // Client wraps the Docker SDK and exposes sandbox operations.
 type Client struct {
-	cli *moby.Client
+	cli    *moby.Client
+	timers sync.Map // map[containerID]*time.Timer
 }
+
+// defaultTimeout is applied when no timeout is specified (15 minutes).
+const defaultTimeout = 900
 
 var (
 	once     sync.Once
@@ -48,7 +52,7 @@ func (c *Client) List(ctx context.Context, all bool) ([]container.Summary, error
 }
 
 // Create creates and starts a sandbox. Docker assigns host ports automatically.
-// Applies optional resource limits and schedules auto-stop if timeout > 0.
+// Applies optional resource limits and schedules auto-stop with a default TTL of 15 minutes.
 func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (models.CreateSandboxResponse, error) {
 	cfg := &container.Config{
 		Image:        req.Image,
@@ -81,13 +85,12 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 		return models.CreateSandboxResponse{}, err
 	}
 
-	// Schedule auto-stop after timeout seconds.
-	if req.Timeout > 0 {
-		go func() {
-			<-time.After(time.Duration(req.Timeout) * time.Second)
-			c.Stop(context.Background(), result.ID)
-		}()
+	// Schedule auto-stop. Default 15 min if not specified.
+	timeout := req.Timeout
+	if timeout <= 0 {
+		timeout = defaultTimeout
 	}
+	c.scheduleStop(result.ID, timeout)
 
 	// Inspect to get Docker-assigned host ports.
 	info, err := c.cli.ContainerInspect(ctx, result.ID, moby.ContainerInspectOptions{})
@@ -110,8 +113,9 @@ func (c *Client) Inspect(ctx context.Context, id string) (container.InspectRespo
 	return result.Container, nil
 }
 
-// Stop stops a running sandbox.
+// Stop stops a running sandbox and cancels its expiration timer.
 func (c *Client) Stop(ctx context.Context, id string) error {
+	c.cancelTimer(id)
 	_, err := c.cli.ContainerStop(ctx, id, moby.ContainerStopOptions{})
 	return wrapNotFound(err)
 }
@@ -122,10 +126,35 @@ func (c *Client) Restart(ctx context.Context, id string) error {
 	return wrapNotFound(err)
 }
 
-// Remove removes a sandbox forcefully.
+// Remove removes a sandbox forcefully and cancels its expiration timer.
 func (c *Client) Remove(ctx context.Context, id string) error {
+	c.cancelTimer(id)
 	_, err := c.cli.ContainerRemove(ctx, id, moby.ContainerRemoveOptions{Force: true})
 	return wrapNotFound(err)
+}
+
+// Pause pauses a running sandbox (freezes all processes).
+func (c *Client) Pause(ctx context.Context, id string) error {
+	_, err := c.cli.ContainerPause(ctx, id, moby.ContainerPauseOptions{})
+	return wrapNotFound(err)
+}
+
+// Resume unpauses a paused sandbox.
+func (c *Client) Resume(ctx context.Context, id string) error {
+	_, err := c.cli.ContainerUnpause(ctx, id, moby.ContainerUnpauseOptions{})
+	return wrapNotFound(err)
+}
+
+// RenewExpiration resets the auto-stop timer for a sandbox.
+func (c *Client) RenewExpiration(ctx context.Context, id string, timeout int) error {
+	// Verify the sandbox exists.
+	if _, err := c.cli.ContainerInspect(ctx, id, moby.ContainerInspectOptions{}); err != nil {
+		return wrapNotFound(err)
+	}
+
+	c.cancelTimer(id)
+	c.scheduleStop(id, timeout)
+	return nil
 }
 
 // Exec runs a command inside a sandbox and returns combined stdout+stderr.
@@ -190,6 +219,24 @@ func (c *Client) execWithStdin(ctx context.Context, id string, cmd []string, std
 	}
 
 	return stdout.String() + stderr.String(), nil
+}
+
+// scheduleStop creates a timer that auto-stops the sandbox after the given seconds.
+func (c *Client) scheduleStop(id string, seconds int) {
+	timer := time.NewTimer(time.Duration(seconds) * time.Second)
+	c.timers.Store(id, timer)
+	go func() {
+		<-timer.C
+		c.timers.Delete(id)
+		c.cli.ContainerStop(context.Background(), id, moby.ContainerStopOptions{})
+	}()
+}
+
+// cancelTimer stops and removes the expiration timer for a sandbox.
+func (c *Client) cancelTimer(id string) {
+	if v, ok := c.timers.LoadAndDelete(id); ok {
+		v.(*time.Timer).Stop()
+	}
 }
 
 // wrapNotFound converts Docker "No such container" errors to ErrNotFound.

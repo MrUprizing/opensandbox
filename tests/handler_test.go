@@ -23,17 +23,20 @@ func init() { gin.SetMode(gin.TestMode) }
 // Each field is an optional function — set only what the test needs, leave the rest nil.
 // If a nil method is called unexpectedly the test will panic, making the gap obvious.
 type stub struct {
-	list       func(bool) ([]container.Summary, error)
-	create     func(models.CreateSandboxRequest) (models.CreateSandboxResponse, error)
-	inspect    func(string) (container.InspectResponse, error)
-	stop       func(string) error
-	restart    func(string) error
-	remove     func(string) error
-	exec       func(string, []string) (string, error)
-	readFile   func(string, string) (string, error)
-	writeFile  func(string, string, string) error
-	deleteFile func(string, string) error
-	listDir    func(string, string) (string, error)
+	list            func(bool) ([]container.Summary, error)
+	create          func(models.CreateSandboxRequest) (models.CreateSandboxResponse, error)
+	inspect         func(string) (container.InspectResponse, error)
+	stop            func(string) error
+	restart         func(string) error
+	remove          func(string) error
+	pause           func(string) error
+	resume          func(string) error
+	renewExpiration func(string, int) error
+	exec            func(string, []string) (string, error)
+	readFile        func(string, string) (string, error)
+	writeFile       func(string, string, string) error
+	deleteFile      func(string, string) error
+	listDir         func(string, string) (string, error)
 }
 
 func (s *stub) List(_ context.Context, all bool) ([]container.Summary, error) {
@@ -48,6 +51,11 @@ func (s *stub) Inspect(_ context.Context, id string) (container.InspectResponse,
 func (s *stub) Stop(_ context.Context, id string) error    { return s.stop(id) }
 func (s *stub) Restart(_ context.Context, id string) error { return s.restart(id) }
 func (s *stub) Remove(_ context.Context, id string) error  { return s.remove(id) }
+func (s *stub) Pause(_ context.Context, id string) error   { return s.pause(id) }
+func (s *stub) Resume(_ context.Context, id string) error  { return s.resume(id) }
+func (s *stub) RenewExpiration(_ context.Context, id string, timeout int) error {
+	return s.renewExpiration(id, timeout)
+}
 func (s *stub) Exec(_ context.Context, id string, cmd []string) (string, error) {
 	return s.exec(id, cmd)
 }
@@ -292,6 +300,99 @@ func TestCreateSandbox_NegativeCPUs(t *testing.T) {
 		"image":     "nextjs-docker:latest",
 		"resources": map[string]any{"memory": 512, "cpus": -0.5},
 	})
+	assert.Equal(t, 400, w.Code)
+	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+}
+
+func TestPauseSandbox(t *testing.T) {
+	r := newRouter(&stub{
+		pause: func(string) error { return nil },
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/pause", nil)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "paused")
+}
+
+func TestPauseSandbox_NotFound(t *testing.T) {
+	r := newRouter(&stub{
+		pause: func(string) error { return docker.ErrNotFound },
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/nope/pause", nil)
+	assert.Equal(t, 404, w.Code)
+	assert.Contains(t, w.Body.String(), "NOT_FOUND")
+}
+
+func TestResumeSandbox(t *testing.T) {
+	r := newRouter(&stub{
+		resume: func(string) error { return nil },
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/resume", nil)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "resumed")
+}
+
+func TestResumeSandbox_NotFound(t *testing.T) {
+	r := newRouter(&stub{
+		resume: func(string) error { return docker.ErrNotFound },
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/nope/resume", nil)
+	assert.Equal(t, 404, w.Code)
+	assert.Contains(t, w.Body.String(), "NOT_FOUND")
+}
+
+func TestRenewExpiration(t *testing.T) {
+	var capturedID string
+	var capturedTimeout int
+	r := newRouter(&stub{
+		renewExpiration: func(id string, timeout int) error {
+			capturedID = id
+			capturedTimeout = timeout
+			return nil
+		},
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/renew-expiration", map[string]any{"timeout": 7200})
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "renewed")
+	assert.Contains(t, w.Body.String(), "7200")
+	assert.Equal(t, "abc123", capturedID)
+	assert.Equal(t, 7200, capturedTimeout)
+}
+
+func TestRenewExpiration_NotFound(t *testing.T) {
+	r := newRouter(&stub{
+		renewExpiration: func(string, int) error { return docker.ErrNotFound },
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/nope/renew-expiration", map[string]any{"timeout": 3600})
+	assert.Equal(t, 404, w.Code)
+	assert.Contains(t, w.Body.String(), "NOT_FOUND")
+}
+
+func TestRenewExpiration_MissingTimeout(t *testing.T) {
+	r := newRouter(&stub{})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/renew-expiration", map[string]any{})
+	assert.Equal(t, 400, w.Code)
+	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+}
+
+func TestRenewExpiration_NegativeTimeout(t *testing.T) {
+	r := newRouter(&stub{})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/renew-expiration", map[string]any{"timeout": -1})
+	assert.Equal(t, 400, w.Code)
+	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+}
+
+func TestRenewExpiration_ZeroTimeout(t *testing.T) {
+	r := newRouter(&stub{})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/renew-expiration", map[string]any{"timeout": 0})
 	assert.Equal(t, 400, w.Code)
 	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
 }

@@ -13,7 +13,7 @@ type CreateSandboxRequest struct {
 	Env       []string        `json:"env"`
 	Cmd       []string        `json:"cmd"`
 	Ports     []string        `json:"ports"`     // container ports to expose: ["80/tcp", "443/tcp"]
-	Timeout   int             `json:"timeout"`   // seconds until auto-stop, 0 = no timeout
+	Timeout   int             `json:"timeout"`   // seconds until auto-stop, 0 = default (900s)
 	Resources *ResourceLimits `json:"resources"` // CPU/memory limits, nil = no limits
 }
 
@@ -48,4 +48,15 @@ type FileWriteRequest struct {
 type FileListResponse struct {
 	Path   string `json:"path"`
 	Output string `json:"output"`
+}
+
+// RenewExpirationRequest is the body for POST /v1/sandboxes/:id/renew-expiration
+type RenewExpirationRequest struct {
+	Timeout int `json:"timeout" binding:"required"` // new TTL in seconds
+}
+
+// RenewExpirationResponse is the response for POST /v1/sandboxes/:id/renew-expiration
+type RenewExpirationResponse struct {
+	Status  string `json:"status"`
+	Timeout int    `json:"timeout"`
 }
