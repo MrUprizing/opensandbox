@@ -8,20 +8,20 @@ import (
 	"open-sandbox/internal/docker"
 )
 
-// errorResponse is the standard error body returned by all API endpoints.
-type errorResponse struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+// ErrorResponse is the standard error body returned by all API endpoints.
+type ErrorResponse struct {
+	Code    string `json:"code" example:"BAD_REQUEST"`
+	Message string `json:"message" example:"image is required"`
 }
 
 // badRequest writes a 400 response with code BAD_REQUEST and the provided message.
 func badRequest(c *gin.Context, msg string) {
-	c.JSON(http.StatusBadRequest, errorResponse{Code: "BAD_REQUEST", Message: msg})
+	c.JSON(http.StatusBadRequest, ErrorResponse{Code: "BAD_REQUEST", Message: msg})
 }
 
 // notFound writes a 404 response with code NOT_FOUND for the given resource name.
 func notFound(c *gin.Context, resource string) {
-	c.JSON(http.StatusNotFound, errorResponse{Code: "NOT_FOUND", Message: resource + " not found"})
+	c.JSON(http.StatusNotFound, ErrorResponse{Code: "NOT_FOUND", Message: resource + " not found"})
 }
 
 // internalError writes a 500 response with code INTERNAL_ERROR.
@@ -31,5 +31,5 @@ func internalError(c *gin.Context, err error) {
 		notFound(c, "sandbox")
 		return
 	}
-	c.JSON(http.StatusInternalServerError, errorResponse{Code: "INTERNAL_ERROR", Message: err.Error()})
+	c.JSON(http.StatusInternalServerError, ErrorResponse{Code: "INTERNAL_ERROR", Message: err.Error()})
 }

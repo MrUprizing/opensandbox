@@ -1,0 +1,561 @@
+basePath: /v1
+definitions:
+  internal_api.ErrorResponse:
+    properties:
+      code:
+        example: BAD_REQUEST
+        type: string
+      message:
+        example: image is required
+        type: string
+    type: object
+  models.CreateSandboxRequest:
+    properties:
+      cmd:
+        items:
+          type: string
+        type: array
+      env:
+        items:
+          type: string
+        type: array
+      image:
+        type: string
+      name:
+        type: string
+      ports:
+        description: 'container ports to expose: ["80/tcp", "443/tcp"]'
+        items:
+          type: string
+        type: array
+      resources:
+        allOf:
+        - $ref: '#/definitions/models.ResourceLimits'
+        description: CPU/memory limits, nil = no limits
+      timeout:
+        description: seconds until auto-stop, 0 = default (900s)
+        type: integer
+    required:
+    - image
+    type: object
+  models.CreateSandboxResponse:
+    properties:
+      id:
+        type: string
+      ports:
+        additionalProperties:
+          type: string
+        description: '"80/tcp": "32768"'
+        type: object
+    type: object
+  models.ExecRequest:
+    properties:
+      cmd:
+        items:
+          type: string
+        type: array
+    required:
+    - cmd
+    type: object
+  models.ExecResponse:
+    properties:
+      output:
+        type: string
+    type: object
+  models.FileListResponse:
+    properties:
+      output:
+        type: string
+      path:
+        type: string
+    type: object
+  models.FileReadResponse:
+    properties:
+      content:
+        type: string
+      path:
+        type: string
+    type: object
+  models.FileWriteRequest:
+    properties:
+      content:
+        type: string
+    required:
+    - content
+    type: object
+  models.RenewExpirationRequest:
+    properties:
+      timeout:
+        description: new TTL in seconds
+        type: integer
+    required:
+    - timeout
+    type: object
+  models.RenewExpirationResponse:
+    properties:
+      status:
+        type: string
+      timeout:
+        type: integer
+    type: object
+  models.ResourceLimits:
+    properties:
+      cpus:
+        description: fractional CPU limit (e.g. 1.5)
+        type: number
+      memory:
+        description: memory limit in MB (e.g. 512 = 512MB)
+        type: integer
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: Docker sandbox orchestrator REST API. Create, manage, and execute commands
+    inside isolated Docker containers.
+  title: Open Sandbox API
+  version: "1.0"
+paths:
+  /sandboxes:
+    get:
+      description: List all active sandboxes. Use ?all=true to include stopped containers.
+      parameters:
+      - description: Include stopped containers
+        in: query
+        name: all
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of sandboxes
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: List sandboxes
+      tags:
+      - sandboxes
+    post:
+      consumes:
+      - application/json
+      description: Create and start a new Docker container. Returns its ID and assigned
+        host ports.
+      parameters:
+      - description: Sandbox configuration
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/models.CreateSandboxRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.CreateSandboxResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: Create a sandbox
+      tags:
+      - sandboxes
+  /sandboxes/{id}:
+    delete:
+      description: Force-remove a sandbox regardless of its state.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: Delete a sandbox
+      tags:
+      - sandboxes
+    get:
+      description: Returns full Docker inspect data for the sandbox.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Docker inspect response
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: Inspect a sandbox
+      tags:
+      - sandboxes
+  /sandboxes/{id}/exec:
+    post:
+      consumes:
+      - application/json
+      description: Run an arbitrary command inside the sandbox and return combined
+        stdout+stderr.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Command to execute
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/models.ExecRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ExecResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: Execute a command
+      tags:
+      - sandboxes
+  /sandboxes/{id}/files:
+    delete:
+      description: Remove a file or directory (recursive) inside the sandbox.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: File path inside the sandbox
+        in: query
+        name: path
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: Delete a file
+      tags:
+      - files
+    get:
+      description: Returns the content of a file at the given path inside the sandbox.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: File path inside the sandbox
+        in: query
+        name: path
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.FileReadResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: Read a file
+      tags:
+      - files
+    put:
+      consumes:
+      - application/json
+      description: Write or overwrite a file inside the sandbox. Creates parent directories
+        as needed.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: File path inside the sandbox
+        in: query
+        name: path
+        required: true
+        type: string
+      - description: File content
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/models.FileWriteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: path and status
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: Write a file
+      tags:
+      - files
+  /sandboxes/{id}/files/list:
+    get:
+      description: Returns the output of ls -la for the given directory. Defaults
+        to root (/).
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 'Directory path (default: /)'
+        in: query
+        name: path
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.FileListResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: List a directory
+      tags:
+      - files
+  /sandboxes/{id}/pause:
+    post:
+      description: Freeze all processes inside the sandbox.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: paused'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: Pause a sandbox
+      tags:
+      - sandboxes
+  /sandboxes/{id}/renew-expiration:
+    post:
+      consumes:
+      - application/json
+      description: Reset the auto-stop timer for a sandbox.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: New timeout
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/models.RenewExpirationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.RenewExpirationResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: Renew sandbox expiration
+      tags:
+      - sandboxes
+  /sandboxes/{id}/restart:
+    post:
+      description: Restart a sandbox (stop + start).
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: restarted'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: Restart a sandbox
+      tags:
+      - sandboxes
+  /sandboxes/{id}/resume:
+    post:
+      description: Resume a paused sandbox.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: resumed'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: Resume a sandbox
+      tags:
+      - sandboxes
+  /sandboxes/{id}/stop:
+    post:
+      description: Gracefully stop a running sandbox.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: stopped'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: Stop a sandbox
+      tags:
+      - sandboxes
+swagger: "2.0"

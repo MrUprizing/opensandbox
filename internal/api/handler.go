@@ -18,7 +18,14 @@ func New(d DockerClient) *Handler {
 }
 
 // listSandboxes handles GET /v1/sandboxes.
-// Accepts ?all=true to include stopped containers.
+// @Summary      List sandboxes
+// @Description  List all active sandboxes. Use ?all=true to include stopped containers.
+// @Tags         sandboxes
+// @Produce      json
+// @Param        all  query  bool  false  "Include stopped containers"
+// @Success      200  {object}  map[string]interface{}  "List of sandboxes"
+// @Failure      500  {object}  ErrorResponse
+// @Router       /sandboxes [get]
 func (h *Handler) listSandboxes(c *gin.Context) {
 	all := c.Query("all") == "true"
 
@@ -32,7 +39,16 @@ func (h *Handler) listSandboxes(c *gin.Context) {
 }
 
 // createSandbox handles POST /v1/sandboxes.
-// Creates and starts a container; returns its ID and assigned host ports.
+// @Summary      Create a sandbox
+// @Description  Create and start a new Docker container. Returns its ID and assigned host ports.
+// @Tags         sandboxes
+// @Accept       json
+// @Produce      json
+// @Param        body  body      models.CreateSandboxRequest  true  "Sandbox configuration"
+// @Success      201   {object}  models.CreateSandboxResponse
+// @Failure      400   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /sandboxes [post]
 func (h *Handler) createSandbox(c *gin.Context) {
 	var req models.CreateSandboxRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -65,7 +81,15 @@ func (h *Handler) createSandbox(c *gin.Context) {
 }
 
 // getSandbox handles GET /v1/sandboxes/:id.
-// Returns full Docker inspect data for the sandbox.
+// @Summary      Inspect a sandbox
+// @Description  Returns full Docker inspect data for the sandbox.
+// @Tags         sandboxes
+// @Produce      json
+// @Param        id   path      string  true  "Sandbox ID"
+// @Success      200  {object}  map[string]interface{}  "Docker inspect response"
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Router       /sandboxes/{id} [get]
 func (h *Handler) getSandbox(c *gin.Context) {
 	info, err := h.docker.Inspect(c.Request.Context(), c.Param("id"))
 	if err != nil {
@@ -77,7 +101,15 @@ func (h *Handler) getSandbox(c *gin.Context) {
 }
 
 // stopSandbox handles POST /v1/sandboxes/:id/stop.
-// Gracefully stops a running sandbox.
+// @Summary      Stop a sandbox
+// @Description  Gracefully stop a running sandbox.
+// @Tags         sandboxes
+// @Produce      json
+// @Param        id   path      string  true  "Sandbox ID"
+// @Success      200  {object}  map[string]string  "status: stopped"
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Router       /sandboxes/{id}/stop [post]
 func (h *Handler) stopSandbox(c *gin.Context) {
 	if err := h.docker.Stop(c.Request.Context(), c.Param("id")); err != nil {
 		internalError(c, err)
@@ -88,7 +120,15 @@ func (h *Handler) stopSandbox(c *gin.Context) {
 }
 
 // restartSandbox handles POST /v1/sandboxes/:id/restart.
-// Restarts a sandbox (stop + start).
+// @Summary      Restart a sandbox
+// @Description  Restart a sandbox (stop + start).
+// @Tags         sandboxes
+// @Produce      json
+// @Param        id   path      string  true  "Sandbox ID"
+// @Success      200  {object}  map[string]string  "status: restarted"
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Router       /sandboxes/{id}/restart [post]
 func (h *Handler) restartSandbox(c *gin.Context) {
 	if err := h.docker.Restart(c.Request.Context(), c.Param("id")); err != nil {
 		internalError(c, err)
@@ -99,7 +139,14 @@ func (h *Handler) restartSandbox(c *gin.Context) {
 }
 
 // deleteSandbox handles DELETE /v1/sandboxes/:id.
-// Force-removes the sandbox regardless of its state. Returns 204 on success.
+// @Summary      Delete a sandbox
+// @Description  Force-remove a sandbox regardless of its state.
+// @Tags         sandboxes
+// @Param        id   path      string  true  "Sandbox ID"
+// @Success      204  "No Content"
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Router       /sandboxes/{id} [delete]
 func (h *Handler) deleteSandbox(c *gin.Context) {
 	if err := h.docker.Remove(c.Request.Context(), c.Param("id")); err != nil {
 		internalError(c, err)
@@ -110,7 +157,18 @@ func (h *Handler) deleteSandbox(c *gin.Context) {
 }
 
 // execSandbox handles POST /v1/sandboxes/:id/exec.
-// Runs an arbitrary command inside the sandbox and returns combined stdout+stderr.
+// @Summary      Execute a command
+// @Description  Run an arbitrary command inside the sandbox and return combined stdout+stderr.
+// @Tags         sandboxes
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string             true  "Sandbox ID"
+// @Param        body  body      models.ExecRequest  true  "Command to execute"
+// @Success      200   {object}  models.ExecResponse
+// @Failure      400   {object}  ErrorResponse
+// @Failure      404   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /sandboxes/{id}/exec [post]
 func (h *Handler) execSandbox(c *gin.Context) {
 	var req models.ExecRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -128,7 +186,17 @@ func (h *Handler) execSandbox(c *gin.Context) {
 }
 
 // readFile handles GET /v1/sandboxes/:id/files?path=<path>.
-// Returns the content of the file at the given path inside the sandbox.
+// @Summary      Read a file
+// @Description  Returns the content of a file at the given path inside the sandbox.
+// @Tags         files
+// @Produce      json
+// @Param        id    path      string  true  "Sandbox ID"
+// @Param        path  query     string  true  "File path inside the sandbox"
+// @Success      200   {object}  models.FileReadResponse
+// @Failure      400   {object}  ErrorResponse
+// @Failure      404   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /sandboxes/{id}/files [get]
 func (h *Handler) readFile(c *gin.Context) {
 	path := c.Query("path")
 	if path == "" {
@@ -146,7 +214,19 @@ func (h *Handler) readFile(c *gin.Context) {
 }
 
 // writeFile handles PUT /v1/sandboxes/:id/files?path=<path>.
-// Writes or overwrites a file inside the sandbox; creates parent dirs as needed.
+// @Summary      Write a file
+// @Description  Write or overwrite a file inside the sandbox. Creates parent directories as needed.
+// @Tags         files
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string                  true  "Sandbox ID"
+// @Param        path  query     string                  true  "File path inside the sandbox"
+// @Param        body  body      models.FileWriteRequest  true  "File content"
+// @Success      200   {object}  map[string]string  "path and status"
+// @Failure      400   {object}  ErrorResponse
+// @Failure      404   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /sandboxes/{id}/files [put]
 func (h *Handler) writeFile(c *gin.Context) {
 	path := c.Query("path")
 	if path == "" {
@@ -169,7 +249,16 @@ func (h *Handler) writeFile(c *gin.Context) {
 }
 
 // deleteFile handles DELETE /v1/sandboxes/:id/files?path=<path>.
-// Removes a file or directory (recursive) inside the sandbox. Returns 204 on success.
+// @Summary      Delete a file
+// @Description  Remove a file or directory (recursive) inside the sandbox.
+// @Tags         files
+// @Param        id    path      string  true  "Sandbox ID"
+// @Param        path  query     string  true  "File path inside the sandbox"
+// @Success      204  "No Content"
+// @Failure      400   {object}  ErrorResponse
+// @Failure      404   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /sandboxes/{id}/files [delete]
 func (h *Handler) deleteFile(c *gin.Context) {
 	path := c.Query("path")
 	if path == "" {
@@ -186,7 +275,16 @@ func (h *Handler) deleteFile(c *gin.Context) {
 }
 
 // listDir handles GET /v1/sandboxes/:id/files/list?path=<path>.
-// Returns the output of `ls -la` for the given directory. Defaults to "/".
+// @Summary      List a directory
+// @Description  Returns the output of ls -la for the given directory. Defaults to root (/).
+// @Tags         files
+// @Produce      json
+// @Param        id    path      string  true   "Sandbox ID"
+// @Param        path  query     string  false  "Directory path (default: /)"
+// @Success      200   {object}  models.FileListResponse
+// @Failure      404   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /sandboxes/{id}/files/list [get]
 func (h *Handler) listDir(c *gin.Context) {
 	path := c.DefaultQuery("path", "/")
 
@@ -200,7 +298,15 @@ func (h *Handler) listDir(c *gin.Context) {
 }
 
 // pauseSandbox handles POST /v1/sandboxes/:id/pause.
-// Freezes all processes inside the sandbox.
+// @Summary      Pause a sandbox
+// @Description  Freeze all processes inside the sandbox.
+// @Tags         sandboxes
+// @Produce      json
+// @Param        id   path      string  true  "Sandbox ID"
+// @Success      200  {object}  map[string]string  "status: paused"
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Router       /sandboxes/{id}/pause [post]
 func (h *Handler) pauseSandbox(c *gin.Context) {
 	if err := h.docker.Pause(c.Request.Context(), c.Param("id")); err != nil {
 		internalError(c, err)
@@ -211,7 +317,15 @@ func (h *Handler) pauseSandbox(c *gin.Context) {
 }
 
 // resumeSandbox handles POST /v1/sandboxes/:id/resume.
-// Resumes a paused sandbox.
+// @Summary      Resume a sandbox
+// @Description  Resume a paused sandbox.
+// @Tags         sandboxes
+// @Produce      json
+// @Param        id   path      string  true  "Sandbox ID"
+// @Success      200  {object}  map[string]string  "status: resumed"
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Router       /sandboxes/{id}/resume [post]
 func (h *Handler) resumeSandbox(c *gin.Context) {
 	if err := h.docker.Resume(c.Request.Context(), c.Param("id")); err != nil {
 		internalError(c, err)
@@ -222,7 +336,18 @@ func (h *Handler) resumeSandbox(c *gin.Context) {
 }
 
 // renewExpiration handles POST /v1/sandboxes/:id/renew-expiration.
-// Resets the auto-stop timer for a sandbox.
+// @Summary      Renew sandbox expiration
+// @Description  Reset the auto-stop timer for a sandbox.
+// @Tags         sandboxes
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string                          true  "Sandbox ID"
+// @Param        body  body      models.RenewExpirationRequest   true  "New timeout"
+// @Success      200   {object}  models.RenewExpirationResponse
+// @Failure      400   {object}  ErrorResponse
+// @Failure      404   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /sandboxes/{id}/renew-expiration [post]
 func (h *Handler) renewExpiration(c *gin.Context) {
 	var req models.RenewExpirationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
