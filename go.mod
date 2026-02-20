@@ -3,6 +3,7 @@ module open-sandbox
 go 1.25.6
 
 require (
+	github.com/containerd/errdefs v1.0.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/moby/moby/api v1.53.0
 	github.com/moby/moby/client v0.2.2
@@ -21,7 +22,6 @@ require (
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
