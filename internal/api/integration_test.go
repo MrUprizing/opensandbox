@@ -1,5 +1,3 @@
-//go:build integration
-
 package api_test
 
 import (
@@ -8,12 +6,13 @@ import (
 
 	"testing"
 
-	"github.com/gin-gonic/gin"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"open-sandbox/internal/api"
 	"open-sandbox/internal/docker"
 	"open-sandbox/models"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func init() { gin.SetMode(gin.TestMode) }
