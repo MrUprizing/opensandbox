@@ -595,7 +595,7 @@ func TestHealthCheck_Healthy(t *testing.T) {
 		ping: func() error { return nil },
 	})
 
-	w := do(r, "GET", "/health", nil)
+	w := do(r, "GET", "/v1/health", nil)
 	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), "healthy")
 }
@@ -605,7 +605,7 @@ func TestHealthCheck_Unhealthy(t *testing.T) {
 		ping: func() error { return errors.New("daemon unreachable") },
 	})
 
-	w := do(r, "GET", "/health", nil)
+	w := do(r, "GET", "/v1/health", nil)
 	assert.Equal(t, 503, w.Code)
 	assert.Contains(t, w.Body.String(), "unhealthy")
 	assert.Contains(t, w.Body.String(), "daemon unreachable")
@@ -617,7 +617,7 @@ func TestHealthCheck_NoAuthRequired(t *testing.T) {
 	}, "sk-test-123")
 
 	// Health check should work without auth header.
-	w := do(r, "GET", "/health", nil)
+	w := do(r, "GET", "/v1/health", nil)
 	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), "healthy")
 }

@@ -41,13 +41,6 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 
-	r.NoRoute(func(c *gin.Context) {
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    "NOT_FOUND",
-			"message": "route not found",
-		})
-	})
-
 	v1 := r.Group("/v1")
 	if cfg.APIKey != "" {
 		v1.Use(api.APIKeyAuth(cfg.APIKey))
@@ -58,6 +51,13 @@ func main() {
 	h.RegisterRoutes(v1)
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerfiles.Handler))
+
+	r.NoRoute(func(c *gin.Context) {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":    "NOT_FOUND",
+			"message": "route not found",
+		})
+	})
 
 	// Graceful shutdown: listen for SIGINT/SIGTERM, then stop tracked containers.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

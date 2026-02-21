@@ -2,9 +2,9 @@ package api
 
 import "github.com/gin-gonic/gin"
 
-// RegisterHealthCheck attaches the /health endpoint directly to the engine (no auth).
+// RegisterHealthCheck attaches the /v1/health endpoint directly to the engine (no auth).
 func (h *Handler) RegisterHealthCheck(r *gin.Engine) {
-	r.GET("/health", h.healthCheck)
+	r.GET("/v1/health", h.healthCheck)
 }
 
 // RegisterRoutes attaches all sandbox routes to the given router group.
