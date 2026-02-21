@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -14,12 +15,14 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
 	moby "github.com/moby/moby/client"
+	"open-sandbox/internal/database"
 	"open-sandbox/models"
 )
 
 // Client wraps the Docker SDK and exposes sandbox operations.
 type Client struct {
 	cli    *moby.Client
+	repo   *database.Repository
 	timers sync.Map // map[containerID]*timerEntry
 }
 
@@ -52,13 +55,13 @@ var (
 
 // New returns the singleton Docker Client.
 // Panics on connection failure (unrecoverable at startup).
-func New() *Client {
+func New(repo *database.Repository) *Client {
 	once.Do(func() {
 		cli, err := moby.NewClientWithOpts(moby.FromEnv, moby.WithAPIVersionNegotiation())
 		if err != nil {
 			panic(err)
 		}
-		instance = &Client{cli: cli}
+		instance = &Client{cli: cli, repo: repo}
 	})
 	return instance
 }
@@ -69,34 +72,73 @@ func (c *Client) Ping(ctx context.Context) error {
 	return err
 }
 
-// List returns all sandboxes. Set all=true to include stopped ones.
-func (c *Client) List(ctx context.Context, all bool) ([]models.SandboxSummary, error) {
-	result, err := c.cli.ContainerList(ctx, moby.ContainerListOptions{All: all})
+// List returns all sandboxes tracked in the database, enriched with live
+// state from Docker. Stopped containers are always included.
+func (c *Client) List(ctx context.Context) ([]models.SandboxSummary, error) {
+	// Fetch all persisted sandboxes from the database.
+	dbSandboxes, err := c.repo.FindAll()
+	if err != nil {
+		return nil, err
+	}
+	if len(dbSandboxes) == 0 {
+		return []models.SandboxSummary{}, nil
+	}
+
+	// Fetch all containers (including stopped) to build a lookup map.
+	result, err := c.cli.ContainerList(ctx, moby.ContainerListOptions{All: true})
 	if err != nil {
 		return nil, err
 	}
 
-	summaries := make([]models.SandboxSummary, 0, len(result.Items))
+	type containerInfo struct {
+		Name   string
+		Image  string
+		Status string
+		State  string
+		Ports  map[string]string
+	}
+	lookup := make(map[string]containerInfo, len(result.Items))
 	for _, item := range result.Items {
 		ports := make(map[string]string)
 		for _, p := range item.Ports {
 			if p.PublicPort > 0 {
-				key := portKey(p.PrivatePort, p.Type)
-				ports[key] = portValue(p.PublicPort)
+				ports[portKey(p.PrivatePort, p.Type)] = portValue(p.PublicPort)
 			}
 		}
-
-		s := models.SandboxSummary{
-			ID:     item.ID,
+		lookup[item.ID] = containerInfo{
 			Name:   containerName(item.Names),
 			Image:  item.Image,
 			Status: item.Status,
 			State:  string(item.State),
 			Ports:  ports,
 		}
+	}
+
+	summaries := make([]models.SandboxSummary, 0, len(dbSandboxes))
+	for _, db := range dbSandboxes {
+		s := models.SandboxSummary{
+			ID:    db.ID,
+			Name:  db.Name,
+			Image: db.Image,
+			Ports: map[string]string(db.Ports),
+		}
+
+		// Enrich with live Docker state if the container still exists.
+		if info, ok := lookup[db.ID]; ok {
+			s.Name = info.Name
+			s.Image = info.Image
+			s.Status = info.Status
+			s.State = info.State
+			if len(info.Ports) > 0 {
+				s.Ports = info.Ports
+			}
+		} else {
+			s.Status = "removed"
+			s.State = "removed"
+		}
 
 		// Attach expiration info if tracked.
-		if entry := c.getTimerEntry(item.ID); entry != nil {
+		if entry := c.getTimerEntry(db.ID); entry != nil {
 			ea := entry.expiresAt
 			s.ExpiresAt = &ea
 		}
@@ -173,9 +215,21 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 		return models.CreateSandboxResponse{}, err
 	}
 
+	ports := extractPorts(info.Container.NetworkSettings.Ports)
+
+	// Persist sandbox (fire-and-forget: log errors, don't block).
+	if err := c.repo.Save(database.Sandbox{
+		ID:    result.ID,
+		Name:  req.Name,
+		Image: req.Image,
+		Ports: database.JSONMap(ports),
+	}); err != nil {
+		log.Printf("database: failed to persist sandbox %s: %v", result.ID, err)
+	}
+
 	return models.CreateSandboxResponse{
 		ID:    result.ID,
-		Ports: extractPorts(info.Container.NetworkSettings.Ports),
+		Ports: ports,
 	}, nil
 }
 
@@ -241,18 +295,33 @@ func (c *Client) Restart(ctx context.Context, id string) (models.RestartResponse
 		expiresAt = &ea
 	}
 
+	ports := extractPorts(info.Container.NetworkSettings.Ports)
+
+	// Update persisted ports after restart (they may change).
+	if dbErr := c.repo.UpdatePorts(id, database.JSONMap(ports)); dbErr != nil {
+		log.Printf("database: failed to update ports for sandbox %s: %v", id, dbErr)
+	}
+
 	return models.RestartResponse{
 		Status:    "restarted",
-		Ports:     extractPorts(info.Container.NetworkSettings.Ports),
+		Ports:     ports,
 		ExpiresAt: expiresAt,
 	}, nil
 }
 
 // Remove removes a sandbox forcefully and cancels its expiration timer.
+// If the container no longer exists in Docker, it still cleans up the DB record.
 func (c *Client) Remove(ctx context.Context, id string) error {
 	c.cancelTimer(id)
 	_, err := c.cli.ContainerRemove(ctx, id, moby.ContainerRemoveOptions{Force: true})
-	return wrapNotFound(err)
+	if err != nil && !errdefs.IsNotFound(err) {
+		return err
+	}
+
+	if dbErr := c.repo.Delete(id); dbErr != nil {
+		log.Printf("database: failed to delete sandbox %s: %v", id, dbErr)
+	}
+	return nil
 }
 
 // Pause pauses a running sandbox (freezes all processes).

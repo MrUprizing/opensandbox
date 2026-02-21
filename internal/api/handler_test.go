@@ -23,7 +23,7 @@ func init() { gin.SetMode(gin.TestMode) }
 // If a nil method is called unexpectedly the test will panic, making the gap obvious.
 type stub struct {
 	ping            func() error
-	list            func(bool) ([]models.SandboxSummary, error)
+	list            func() ([]models.SandboxSummary, error)
 	create          func(models.CreateSandboxRequest) (models.CreateSandboxResponse, error)
 	inspect         func(string) (models.SandboxDetail, error)
 	stop            func(string) error
@@ -46,8 +46,8 @@ func (s *stub) Ping(_ context.Context) error {
 	}
 	return nil
 }
-func (s *stub) List(_ context.Context, all bool) ([]models.SandboxSummary, error) {
-	return s.list(all)
+func (s *stub) List(_ context.Context) ([]models.SandboxSummary, error) {
+	return s.list()
 }
 func (s *stub) Create(_ context.Context, r models.CreateSandboxRequest) (models.CreateSandboxResponse, error) {
 	return s.create(r)
@@ -137,7 +137,7 @@ func doWithAuth(r *gin.Engine, method, url string, body any, token string) *http
 
 func TestListSandboxes(t *testing.T) {
 	r := newRouter(&stub{
-		list: func(bool) ([]models.SandboxSummary, error) {
+		list: func() ([]models.SandboxSummary, error) {
 			return []models.SandboxSummary{{ID: "abc123", Name: "test", Image: "nginx", Status: "running", State: "running"}}, nil
 		},
 	})
@@ -329,7 +329,7 @@ func TestListDir(t *testing.T) {
 
 func TestInternalError(t *testing.T) {
 	r := newRouter(&stub{
-		list: func(bool) ([]models.SandboxSummary, error) {
+		list: func() ([]models.SandboxSummary, error) {
 			return nil, errors.New("daemon unreachable")
 		},
 	})
@@ -535,7 +535,7 @@ func TestRenewExpiration_ZeroTimeout(t *testing.T) {
 
 func TestApiKeyAuth_NoHeader(t *testing.T) {
 	r := newAuthRouter(&stub{
-		list: func(bool) ([]models.SandboxSummary, error) {
+		list: func() ([]models.SandboxSummary, error) {
 			return []models.SandboxSummary{}, nil
 		},
 	}, "sk-test-123")
@@ -547,7 +547,7 @@ func TestApiKeyAuth_NoHeader(t *testing.T) {
 
 func TestApiKeyAuth_WrongKey(t *testing.T) {
 	r := newAuthRouter(&stub{
-		list: func(bool) ([]models.SandboxSummary, error) {
+		list: func() ([]models.SandboxSummary, error) {
 			return []models.SandboxSummary{}, nil
 		},
 	}, "sk-test-123")
@@ -559,7 +559,7 @@ func TestApiKeyAuth_WrongKey(t *testing.T) {
 
 func TestApiKeyAuth_CorrectKey(t *testing.T) {
 	r := newAuthRouter(&stub{
-		list: func(bool) ([]models.SandboxSummary, error) {
+		list: func() ([]models.SandboxSummary, error) {
 			return []models.SandboxSummary{{ID: "abc123"}}, nil
 		},
 	}, "sk-test-123")
@@ -571,7 +571,7 @@ func TestApiKeyAuth_CorrectKey(t *testing.T) {
 
 func TestNoAuth_WorksWithoutMiddleware(t *testing.T) {
 	r := newRouter(&stub{
-		list: func(bool) ([]models.SandboxSummary, error) {
+		list: func() ([]models.SandboxSummary, error) {
 			return []models.SandboxSummary{{ID: "abc123"}}, nil
 		},
 	})

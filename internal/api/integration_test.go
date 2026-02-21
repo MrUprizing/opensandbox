@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"open-sandbox/internal/api"
+	"open-sandbox/internal/database"
 	"open-sandbox/internal/docker"
 	"open-sandbox/models"
 
@@ -17,8 +18,10 @@ import (
 
 // realRouter builds a Gin engine wired to the real Docker daemon.
 func realRouter() *gin.Engine {
+	db := database.New(":memory:")
+	repo := database.NewRepository(db)
 	r := gin.New()
-	h := api.New(docker.New())
+	h := api.New(docker.New(repo))
 	h.RegisterHealthCheck(r)
 	h.RegisterRoutes(r.Group("/v1"))
 	return r

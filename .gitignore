@@ -41,3 +41,6 @@ dist/
 # Temporary files
 tmp/
 temp/
+
+# SQLite database
+*.db

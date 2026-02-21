@@ -222,12 +222,7 @@ paths:
       - images
   /sandboxes:
     get:
-      description: List all active sandboxes. Use ?all=true to include stopped containers.
-      parameters:
-      - description: Include stopped containers
-        in: query
-        name: all
-        type: boolean
+      description: List all sandboxes (running and stopped).
       produces:
       - application/json
       responses:

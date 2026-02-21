@@ -38,18 +38,15 @@ func (h *Handler) healthCheck(c *gin.Context) {
 
 // listSandboxes handles GET /v1/sandboxes.
 // @Summary      List sandboxes
-// @Description  List all active sandboxes. Use ?all=true to include stopped containers.
+// @Description  List all sandboxes (running and stopped).
 // @Tags         sandboxes
 // @Produce      json
-// @Param        all  query  bool  false  "Include stopped containers"
 // @Success      200  {object}  map[string]interface{}  "List of sandboxes"
 // @Failure      500  {object}  ErrorResponse
 // @Security     ApiKeyAuth
 // @Router       /sandboxes [get]
 func (h *Handler) listSandboxes(c *gin.Context) {
-	all := c.Query("all") == "true"
-
-	items, err := h.docker.List(c.Request.Context(), all)
+	items, err := h.docker.List(c.Request.Context())
 	if err != nil {
 		internalError(c, err)
 		return

@@ -105,7 +105,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "List all active sandboxes. Use ?all=true to include stopped containers.",
+                "description": "List all sandboxes (running and stopped).",
                 "produces": [
                     "application/json"
                 ],
@@ -113,14 +113,6 @@ const docTemplate = `{
                     "sandboxes"
                 ],
                 "summary": "List sandboxes",
-                "parameters": [
-                    {
-                        "type": "boolean",
-                        "description": "Include stopped containers",
-                        "name": "all",
-                        "in": "query"
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "List of sandboxes",

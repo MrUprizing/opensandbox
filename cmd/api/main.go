@@ -13,6 +13,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"open-sandbox/internal/api"
 	"open-sandbox/internal/config"
+	"open-sandbox/internal/database"
 	"open-sandbox/internal/docker"
 
 	_ "open-sandbox/docs"
@@ -32,7 +33,10 @@ import (
 
 func main() {
 	cfg := config.Load()
-	dc := docker.New()
+
+	db := database.New("sandbox.db")
+	repo := database.NewRepository(db)
+	dc := docker.New(repo)
 
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
