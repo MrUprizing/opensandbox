@@ -26,5 +26,6 @@ func (h *Handler) RegisterRoutes(v1 *gin.RouterGroup) {
 	sb.GET("/:id/files/list", h.listDir)
 
 	img := v1.Group("/images")
+	img.GET("", h.listImages)
 	img.POST("/pull", h.pullImage)
 }

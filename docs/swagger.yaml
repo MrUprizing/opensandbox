@@ -188,6 +188,26 @@ paths:
       summary: Health check
       tags:
       - system
+  /images:
+    get:
+      description: Returns all Docker images available locally.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of images
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List local images
+      tags:
+      - images
   /images/pull:
     post:
       consumes:

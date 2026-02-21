@@ -105,3 +105,10 @@ type ImagePullResponse struct {
 	Status string `json:"status"`
 	Image  string `json:"image"`
 }
+
+// ImageSummary is a concise view of a local Docker image.
+type ImageSummary struct {
+	ID   string   `json:"id"`
+	Tags []string `json:"tags"`
+	Size int64    `json:"size"` // bytes
+}

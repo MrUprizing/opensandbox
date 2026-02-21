@@ -438,3 +438,27 @@ func (h *Handler) pullImage(c *gin.Context) {
 
 	c.JSON(http.StatusOK, models.ImagePullResponse{Status: "pulled", Image: req.Image})
 }
+
+// listImages handles GET /v1/images.
+// @Summary      List local images
+// @Description  Returns all Docker images available locally.
+// @Tags         images
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "List of images"
+// @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
+// @Router       /images [get]
+func (h *Handler) listImages(c *gin.Context) {
+	images, err := h.docker.ListImages(c.Request.Context())
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+
+	if len(images) == 0 {
+		c.JSON(http.StatusOK, gin.H{"images": images, "message": "no images found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"images": images})
+}

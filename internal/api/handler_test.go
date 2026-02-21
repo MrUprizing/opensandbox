@@ -38,6 +38,7 @@ type stub struct {
 	deleteFile      func(string, string) error
 	listDir         func(string, string) (string, error)
 	pullImage       func(string) error
+	listImages      func() ([]models.ImageSummary, error)
 }
 
 func (s *stub) Ping(_ context.Context) error {
@@ -83,6 +84,12 @@ func (s *stub) PullImage(_ context.Context, image string) error {
 		return s.pullImage(image)
 	}
 	return nil
+}
+func (s *stub) ListImages(_ context.Context) ([]models.ImageSummary, error) {
+	if s.listImages != nil {
+		return s.listImages()
+	}
+	return []models.ImageSummary{}, nil
 }
 
 // newRouter builds a Gin engine with all sandbox routes registered for the given client.

@@ -379,17 +379,33 @@ func (c *Client) ListDir(ctx context.Context, id, path string) (string, error) {
 	return c.Exec(ctx, id, []string{"ls", "-la", path})
 }
 
-// PullImage pulls a Docker image from a registry.
+// PullImage pulls a Docker image from a registry and waits for completion.
 func (c *Client) PullImage(ctx context.Context, image string) error {
-	reader, err := c.cli.ImagePull(ctx, image, moby.ImagePullOptions{})
+	resp, err := c.cli.ImagePull(ctx, image, moby.ImagePullOptions{})
 	if err != nil {
 		return err
 	}
-	defer reader.Close()
+	defer resp.Close()
 
-	// Wait for pull to complete by reading all output
-	_, err = io.Copy(io.Discard, reader)
-	return err
+	return resp.Wait(ctx)
+}
+
+// ListImages returns all locally available Docker images.
+func (c *Client) ListImages(ctx context.Context) ([]models.ImageSummary, error) {
+	result, err := c.cli.ImageList(ctx, moby.ImageListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	images := make([]models.ImageSummary, 0, len(result.Items))
+	for _, item := range result.Items {
+		images = append(images, models.ImageSummary{
+			ID:   item.ID,
+			Tags: item.RepoTags,
+			Size: item.Size,
+		})
+	}
+	return images, nil
 }
 
 // ImageExists checks if an image exists locally.
