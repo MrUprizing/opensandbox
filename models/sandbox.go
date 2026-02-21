@@ -127,6 +127,16 @@ type MemoryUsage struct {
 	Percent float64 `json:"percent"` // usage / limit * 100
 }
 
+// ImageDetail is the inspect response for a single Docker image.
+type ImageDetail struct {
+	ID           string   `json:"id"`
+	Tags         []string `json:"tags"`
+	Size         int64    `json:"size"`         // bytes
+	Created      string   `json:"created"`      // RFC3339
+	Architecture string   `json:"architecture"` // e.g. "amd64"
+	OS           string   `json:"os"`           // e.g. "linux"
+}
+
 // ImageSummary is a concise view of a local Docker image.
 type ImageSummary struct {
 	ID   string   `json:"id"`

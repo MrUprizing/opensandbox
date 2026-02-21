@@ -83,6 +83,27 @@ definitions:
     required:
     - content
     type: object
+  models.ImageDetail:
+    properties:
+      architecture:
+        description: e.g. "amd64"
+        type: string
+      created:
+        description: RFC3339
+        type: string
+      id:
+        type: string
+      os:
+        description: e.g. "linux"
+        type: string
+      size:
+        description: bytes
+        type: integer
+      tags:
+        items:
+          type: string
+        type: array
+    type: object
   models.ImagePullRequest:
     properties:
       image:
@@ -231,6 +252,64 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: List local images
+      tags:
+      - images
+  /images/{id}:
+    delete:
+      description: Removes a Docker image from the local store. Use force=true if
+        containers reference it.
+      parameters:
+      - description: Image ID or name:tag
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Force removal even if referenced by containers
+        in: query
+        name: force
+        type: boolean
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete a local image
+      tags:
+      - images
+    get:
+      description: Returns details for a single local Docker image.
+      parameters:
+      - description: Image ID or name:tag
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ImageDetail'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Inspect an image
       tags:
       - images
   /images/pull:
@@ -745,6 +824,36 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: Resume a sandbox
+      tags:
+      - sandboxes
+  /sandboxes/{id}/start:
+    post:
+      description: Start a stopped sandbox. Returns the port mappings and a fresh
+        expiration timer.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.RestartResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Start a sandbox
       tags:
       - sandboxes
   /sandboxes/{id}/stats:

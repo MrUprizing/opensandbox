@@ -14,6 +14,7 @@ func (h *Handler) RegisterRoutes(v1 *gin.RouterGroup) {
 	sb.POST("", h.createSandbox)
 	sb.GET("/:id", h.getSandbox)
 	sb.DELETE("/:id", h.deleteSandbox)
+	sb.POST("/:id/start", h.startSandbox)
 	sb.POST("/:id/stop", h.stopSandbox)
 	sb.POST("/:id/restart", h.restartSandbox)
 	sb.POST("/:id/pause", h.pauseSandbox)
@@ -29,5 +30,7 @@ func (h *Handler) RegisterRoutes(v1 *gin.RouterGroup) {
 
 	img := v1.Group("/images")
 	img.GET("", h.listImages)
+	img.GET("/:id", h.getImage)
 	img.POST("/pull", h.pullImage)
+	img.DELETE("/:id", h.deleteImage)
 }

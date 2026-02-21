@@ -13,6 +13,7 @@ type DockerClient interface {
 	List(ctx context.Context) ([]models.SandboxSummary, error)
 	Create(ctx context.Context, req models.CreateSandboxRequest) (models.CreateSandboxResponse, error)
 	Inspect(ctx context.Context, id string) (models.SandboxDetail, error)
+	Start(ctx context.Context, id string) (models.RestartResponse, error)
 	Stop(ctx context.Context, id string) error
 	Restart(ctx context.Context, id string) (models.RestartResponse, error)
 	Remove(ctx context.Context, id string) error
@@ -27,5 +28,7 @@ type DockerClient interface {
 	DeleteFile(ctx context.Context, id, path string) error
 	ListDir(ctx context.Context, id, path string) (string, error)
 	PullImage(ctx context.Context, image string) error
+	RemoveImage(ctx context.Context, id string, force bool) error
+	InspectImage(ctx context.Context, id string) (models.ImageDetail, error)
 	ListImages(ctx context.Context) ([]models.ImageSummary, error)
 }

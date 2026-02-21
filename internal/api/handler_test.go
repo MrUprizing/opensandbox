@@ -27,6 +27,7 @@ type stub struct {
 	list            func() ([]models.SandboxSummary, error)
 	create          func(models.CreateSandboxRequest) (models.CreateSandboxResponse, error)
 	inspect         func(string) (models.SandboxDetail, error)
+	start           func(string) (models.RestartResponse, error)
 	stop            func(string) error
 	restart         func(string) (models.RestartResponse, error)
 	remove          func(string) error
@@ -41,6 +42,8 @@ type stub struct {
 	deleteFile      func(string, string) error
 	listDir         func(string, string) (string, error)
 	pullImage       func(string) error
+	removeImage     func(string, bool) error
+	inspectImage    func(string) (models.ImageDetail, error)
 	listImages      func() ([]models.ImageSummary, error)
 }
 
@@ -58,6 +61,12 @@ func (s *stub) Create(_ context.Context, r models.CreateSandboxRequest) (models.
 }
 func (s *stub) Inspect(_ context.Context, id string) (models.SandboxDetail, error) {
 	return s.inspect(id)
+}
+func (s *stub) Start(_ context.Context, id string) (models.RestartResponse, error) {
+	if s.start != nil {
+		return s.start(id)
+	}
+	return models.RestartResponse{}, nil
 }
 func (s *stub) Stop(_ context.Context, id string) error { return s.stop(id) }
 func (s *stub) Restart(_ context.Context, id string) (models.RestartResponse, error) {
@@ -99,6 +108,18 @@ func (s *stub) PullImage(_ context.Context, image string) error {
 		return s.pullImage(image)
 	}
 	return nil
+}
+func (s *stub) RemoveImage(_ context.Context, id string, force bool) error {
+	if s.removeImage != nil {
+		return s.removeImage(id, force)
+	}
+	return nil
+}
+func (s *stub) InspectImage(_ context.Context, id string) (models.ImageDetail, error) {
+	if s.inspectImage != nil {
+		return s.inspectImage(id)
+	}
+	return models.ImageDetail{}, nil
 }
 func (s *stub) ListImages(_ context.Context) ([]models.ImageSummary, error) {
 	if s.listImages != nil {
@@ -846,4 +867,116 @@ func TestGetStats_Error(t *testing.T) {
 	w := do(r, "GET", "/v1/sandboxes/abc123/stats", nil)
 	assert.Equal(t, 500, w.Code)
 	assert.Contains(t, w.Body.String(), "INTERNAL_ERROR")
+}
+
+// ── Start Tests ─────────────────────────────────────────────────────────────
+
+func TestStartSandbox(t *testing.T) {
+	r := newRouter(&stub{
+		start: func(id string) (models.RestartResponse, error) {
+			return models.RestartResponse{
+				Status: "started",
+				Ports:  map[string]string{"3000/tcp": "32780"},
+			}, nil
+		},
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/start", nil)
+	assert.Equal(t, 200, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, "started")
+	assert.Contains(t, body, "32780")
+}
+
+func TestStartSandbox_NotFound(t *testing.T) {
+	r := newRouter(&stub{
+		start: func(string) (models.RestartResponse, error) {
+			return models.RestartResponse{}, docker.ErrNotFound
+		},
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/nope/start", nil)
+	assert.Equal(t, 404, w.Code)
+	assert.Contains(t, w.Body.String(), "NOT_FOUND")
+}
+
+// ── Delete Image Tests ──────────────────────────────────────────────────────
+
+func TestDeleteImage(t *testing.T) {
+	var capturedID string
+	var capturedForce bool
+	r := newRouter(&stub{
+		removeImage: func(id string, force bool) error {
+			capturedID = id
+			capturedForce = force
+			return nil
+		},
+	})
+
+	w := do(r, "DELETE", "/v1/images/nginx:latest", nil)
+	assert.Equal(t, 204, w.Code)
+	assert.Equal(t, "nginx:latest", capturedID)
+	assert.False(t, capturedForce)
+}
+
+func TestDeleteImage_Force(t *testing.T) {
+	var capturedForce bool
+	r := newRouter(&stub{
+		removeImage: func(_ string, force bool) error {
+			capturedForce = force
+			return nil
+		},
+	})
+
+	w := do(r, "DELETE", "/v1/images/nginx:latest?force=true", nil)
+	assert.Equal(t, 204, w.Code)
+	assert.True(t, capturedForce)
+}
+
+func TestDeleteImage_NotFound(t *testing.T) {
+	r := newRouter(&stub{
+		removeImage: func(string, bool) error {
+			return docker.ErrNotFound
+		},
+	})
+
+	w := do(r, "DELETE", "/v1/images/nope", nil)
+	assert.Equal(t, 404, w.Code)
+	assert.Contains(t, w.Body.String(), "NOT_FOUND")
+}
+
+// ── Inspect Image Tests ─────────────────────────────────────────────────────
+
+func TestGetImage(t *testing.T) {
+	r := newRouter(&stub{
+		inspectImage: func(id string) (models.ImageDetail, error) {
+			return models.ImageDetail{
+				ID:           "sha256:abc123",
+				Tags:         []string{"nginx:latest"},
+				Size:         142000000,
+				Created:      "2026-01-15T10:00:00Z",
+				Architecture: "amd64",
+				OS:           "linux",
+			}, nil
+		},
+	})
+
+	w := do(r, "GET", "/v1/images/nginx:latest", nil)
+	assert.Equal(t, 200, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, "sha256:abc123")
+	assert.Contains(t, body, "amd64")
+	assert.Contains(t, body, "linux")
+}
+
+func TestGetImage_NotFound(t *testing.T) {
+	r := newRouter(&stub{
+		inspectImage: func(string) (models.ImageDetail, error) {
+			return models.ImageDetail{}, docker.ErrNotFound
+		},
+	})
+
+	w := do(r, "GET", "/v1/images/nope", nil)
+	assert.Equal(t, 404, w.Code)
+	assert.Contains(t, w.Body.String(), "NOT_FOUND")
 }

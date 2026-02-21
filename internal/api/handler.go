@@ -136,6 +136,27 @@ func (h *Handler) getSandbox(c *gin.Context) {
 	c.JSON(http.StatusOK, info)
 }
 
+// startSandbox handles POST /v1/sandboxes/:id/start.
+// @Summary      Start a sandbox
+// @Description  Start a stopped sandbox. Returns the port mappings and a fresh expiration timer.
+// @Tags         sandboxes
+// @Produce      json
+// @Param        id   path      string  true  "Sandbox ID"
+// @Success      200  {object}  models.RestartResponse
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
+// @Router       /sandboxes/{id}/start [post]
+func (h *Handler) startSandbox(c *gin.Context) {
+	result, err := h.docker.Start(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
 // stopSandbox handles POST /v1/sandboxes/:id/stop.
 // @Summary      Stop a sandbox
 // @Description  Gracefully stop a running sandbox.
@@ -544,6 +565,48 @@ func (h *Handler) pullImage(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, models.ImagePullResponse{Status: "pulled", Image: req.Image})
+}
+
+// deleteImage handles DELETE /v1/images/:id.
+// @Summary      Delete a local image
+// @Description  Removes a Docker image from the local store. Use force=true if containers reference it.
+// @Tags         images
+// @Param        id     path      string  true   "Image ID or name:tag"
+// @Param        force  query     bool    false  "Force removal even if referenced by containers"
+// @Success      204  "No Content"
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
+// @Router       /images/{id} [delete]
+func (h *Handler) deleteImage(c *gin.Context) {
+	force := c.Query("force") == "true"
+	if err := h.docker.RemoveImage(c.Request.Context(), c.Param("id"), force); err != nil {
+		internalError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// getImage handles GET /v1/images/:id.
+// @Summary      Inspect an image
+// @Description  Returns details for a single local Docker image.
+// @Tags         images
+// @Produce      json
+// @Param        id   path      string  true  "Image ID or name:tag"
+// @Success      200  {object}  models.ImageDetail
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
+// @Router       /images/{id} [get]
+func (h *Handler) getImage(c *gin.Context) {
+	detail, err := h.docker.InspectImage(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, detail)
 }
 
 // listImages handles GET /v1/images.

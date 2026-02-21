@@ -267,6 +267,38 @@ func (c *Client) Inspect(ctx context.Context, id string) (models.SandboxDetail, 
 	return detail, nil
 }
 
+// Start starts a stopped sandbox and re-schedules the auto-stop timer.
+func (c *Client) Start(ctx context.Context, id string) (models.RestartResponse, error) {
+	if _, err := c.cli.ContainerStart(ctx, id, moby.ContainerStartOptions{}); err != nil {
+		return models.RestartResponse{}, wrapNotFound(err)
+	}
+
+	c.scheduleStop(id, defaultTimeout)
+
+	info, err := c.cli.ContainerInspect(ctx, id, moby.ContainerInspectOptions{})
+	if err != nil {
+		return models.RestartResponse{}, wrapNotFound(err)
+	}
+
+	var expiresAt *time.Time
+	if entry := c.getTimerEntry(id); entry != nil {
+		ea := entry.expiresAt
+		expiresAt = &ea
+	}
+
+	ports := extractPorts(info.Container.NetworkSettings.Ports)
+
+	if dbErr := c.repo.UpdatePorts(id, database.JSONMap(ports)); dbErr != nil {
+		log.Printf("database: failed to update ports for sandbox %s: %v", id, dbErr)
+	}
+
+	return models.RestartResponse{
+		Status:    "started",
+		Ports:     ports,
+		ExpiresAt: expiresAt,
+	}, nil
+}
+
 // Stop stops a running sandbox and cancels its expiration timer.
 func (c *Client) Stop(ctx context.Context, id string) error {
 	c.cancelTimer(id)
@@ -471,6 +503,35 @@ func (c *Client) PullImage(ctx context.Context, image string) error {
 	}
 
 	return nil
+}
+
+// RemoveImage removes a local Docker image. Use force=true to remove even if containers reference it.
+func (c *Client) RemoveImage(ctx context.Context, id string, force bool) error {
+	_, err := c.cli.ImageRemove(ctx, id, moby.ImageRemoveOptions{
+		Force:         force,
+		PruneChildren: true,
+	})
+	if err != nil {
+		return wrapNotFound(err)
+	}
+	return nil
+}
+
+// InspectImage returns curated details for a single Docker image.
+func (c *Client) InspectImage(ctx context.Context, id string) (models.ImageDetail, error) {
+	result, err := c.cli.ImageInspect(ctx, id)
+	if err != nil {
+		return models.ImageDetail{}, wrapNotFound(err)
+	}
+
+	return models.ImageDetail{
+		ID:           result.ID,
+		Tags:         result.RepoTags,
+		Size:         result.Size,
+		Created:      result.Created,
+		Architecture: result.Architecture,
+		OS:           result.Os,
+	}, nil
 }
 
 // ListImages returns all locally available Docker images.
