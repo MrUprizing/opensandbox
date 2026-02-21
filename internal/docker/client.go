@@ -49,21 +49,22 @@ const (
 )
 
 var (
-	once     sync.Once
-	instance *Client
+	once       sync.Once
+	mobyClient *moby.Client
 )
 
-// New returns the singleton Docker Client.
-// Panics on connection failure (unrecoverable at startup).
+// New creates a Docker Client with the given repository.
+// The underlying Docker connection is a singleton (created once),
+// but each Client gets its own repository.
 func New(repo *database.Repository) *Client {
 	once.Do(func() {
 		cli, err := moby.NewClientWithOpts(moby.FromEnv, moby.WithAPIVersionNegotiation())
 		if err != nil {
 			panic(err)
 		}
-		instance = &Client{cli: cli, repo: repo}
+		mobyClient = cli
 	})
-	return instance
+	return &Client{cli: mobyClient, repo: repo}
 }
 
 // Ping checks connectivity with the Docker daemon.
