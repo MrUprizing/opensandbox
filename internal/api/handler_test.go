@@ -35,6 +35,7 @@ type stub struct {
 	renewExpiration func(string, int) error
 	exec            func(string, []string) (string, error)
 	logs            func(string, models.LogsOptions) (io.ReadCloser, error)
+	stats           func(string) (models.SandboxStats, error)
 	readFile        func(string, string) (string, error)
 	writeFile       func(string, string, string) error
 	deleteFile      func(string, string) error
@@ -76,6 +77,12 @@ func (s *stub) Logs(_ context.Context, id string, opts models.LogsOptions) (io.R
 		return s.logs(id, opts)
 	}
 	return io.NopCloser(bytes.NewReader(nil)), nil
+}
+func (s *stub) Stats(_ context.Context, id string) (models.SandboxStats, error) {
+	if s.stats != nil {
+		return s.stats(id)
+	}
+	return models.SandboxStats{}, nil
 }
 func (s *stub) ReadFile(_ context.Context, id, path string) (string, error) {
 	return s.readFile(id, path)
@@ -790,4 +797,53 @@ func TestGetLogs_NegativeTail(t *testing.T) {
 	w := do(r, "GET", "/v1/sandboxes/abc123/logs?tail=-5", nil)
 	assert.Equal(t, 400, w.Code)
 	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+}
+
+// ── Stats Tests ─────────────────────────────────────────────────────────────
+
+func TestGetStats_OK(t *testing.T) {
+	r := newRouter(&stub{
+		stats: func(id string) (models.SandboxStats, error) {
+			return models.SandboxStats{
+				CPU: 25.5,
+				Memory: models.MemoryUsage{
+					Usage:   512 * 1024 * 1024,
+					Limit:   1024 * 1024 * 1024,
+					Percent: 50.0,
+				},
+				PIDs: 12,
+			}, nil
+		},
+	})
+
+	w := do(r, "GET", "/v1/sandboxes/abc123/stats", nil)
+	assert.Equal(t, 200, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, "25.5")
+	assert.Contains(t, body, "50")
+	assert.Contains(t, body, `"pids":12`)
+}
+
+func TestGetStats_NotFound(t *testing.T) {
+	r := newRouter(&stub{
+		stats: func(string) (models.SandboxStats, error) {
+			return models.SandboxStats{}, docker.ErrNotFound
+		},
+	})
+
+	w := do(r, "GET", "/v1/sandboxes/nope/stats", nil)
+	assert.Equal(t, 404, w.Code)
+	assert.Contains(t, w.Body.String(), "NOT_FOUND")
+}
+
+func TestGetStats_Error(t *testing.T) {
+	r := newRouter(&stub{
+		stats: func(string) (models.SandboxStats, error) {
+			return models.SandboxStats{}, errors.New("daemon error")
+		},
+	})
+
+	w := do(r, "GET", "/v1/sandboxes/abc123/stats", nil)
+	assert.Equal(t, 500, w.Code)
+	assert.Contains(t, w.Body.String(), "INTERNAL_ERROR")
 }

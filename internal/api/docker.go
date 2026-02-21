@@ -21,6 +21,7 @@ type DockerClient interface {
 	RenewExpiration(ctx context.Context, id string, timeout int) error
 	Exec(ctx context.Context, id string, cmd []string) (string, error)
 	Logs(ctx context.Context, id string, opts models.LogsOptions) (io.ReadCloser, error)
+	Stats(ctx context.Context, id string) (models.SandboxStats, error)
 	ReadFile(ctx context.Context, id, path string) (string, error)
 	WriteFile(ctx context.Context, id, path, content string) error
 	DeleteFile(ctx context.Context, id, path string) error

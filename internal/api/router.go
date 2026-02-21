@@ -21,6 +21,7 @@ func (h *Handler) RegisterRoutes(v1 *gin.RouterGroup) {
 	sb.POST("/:id/renew-expiration", h.renewExpiration)
 	sb.POST("/:id/exec", h.execSandbox)
 	sb.GET("/:id/logs", h.getLogs)
+	sb.GET("/:id/stats", h.getStats)
 	sb.GET("/:id/files", h.readFile)
 	sb.PUT("/:id/files", h.writeFile)
 	sb.DELETE("/:id/files", h.deleteFile)

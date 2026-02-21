@@ -226,6 +226,27 @@ func (h *Handler) execSandbox(c *gin.Context) {
 	c.JSON(http.StatusOK, models.ExecResponse{Output: output})
 }
 
+// getStats handles GET /v1/sandboxes/:id/stats.
+// @Summary      Get container stats
+// @Description  Returns a snapshot of CPU, memory and process usage for the sandbox.
+// @Tags         sandboxes
+// @Produce      json
+// @Param        id   path      string  true  "Sandbox ID"
+// @Success      200  {object}  models.SandboxStats
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
+// @Router       /sandboxes/{id}/stats [get]
+func (h *Handler) getStats(c *gin.Context) {
+	stats, err := h.docker.Stats(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, stats)
+}
+
 // getLogs handles GET /v1/sandboxes/:id/logs.
 // @Summary      Get container logs
 // @Description  Returns container logs. Use follow=true for real-time SSE streaming.

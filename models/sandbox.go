@@ -113,6 +113,20 @@ type LogsOptions struct {
 	Timestamps bool `form:"timestamps"` // include timestamp per line
 }
 
+// SandboxStats is a curated snapshot of container resource usage.
+type SandboxStats struct {
+	CPU    float64     `json:"cpu_percent"` // CPU usage percentage
+	Memory MemoryUsage `json:"memory"`      // memory usage and limit
+	PIDs   uint64      `json:"pids"`        // number of running processes
+}
+
+// MemoryUsage holds memory consumption details.
+type MemoryUsage struct {
+	Usage   uint64  `json:"usage"`   // bytes currently used
+	Limit   uint64  `json:"limit"`   // bytes limit
+	Percent float64 `json:"percent"` // usage / limit * 100
+}
+
 // ImageSummary is a concise view of a local Docker image.
 type ImageSummary struct {
 	ID   string   `json:"id"`

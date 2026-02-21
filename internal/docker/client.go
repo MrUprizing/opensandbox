@@ -3,9 +3,11 @@ package docker
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -370,6 +372,46 @@ func (c *Client) Logs(ctx context.Context, id string, opts models.LogsOptions) (
 		return nil, wrapNotFound(err)
 	}
 	return rc, nil
+}
+
+// Stats returns a curated snapshot of container resource usage.
+func (c *Client) Stats(ctx context.Context, id string) (models.SandboxStats, error) {
+	result, err := c.cli.ContainerStats(ctx, id, moby.ContainerStatsOptions{
+		Stream:                false,
+		IncludePreviousSample: true,
+	})
+	if err != nil {
+		return models.SandboxStats{}, wrapNotFound(err)
+	}
+	defer result.Body.Close()
+
+	var raw container.StatsResponse
+	if err := json.NewDecoder(result.Body).Decode(&raw); err != nil {
+		return models.SandboxStats{}, fmt.Errorf("decode stats: %w", err)
+	}
+
+	// CPU % = (cpuDelta / systemDelta) * numCPUs * 100
+	cpuPercent := 0.0
+	cpuDelta := float64(raw.CPUStats.CPUUsage.TotalUsage - raw.PreCPUStats.CPUUsage.TotalUsage)
+	sysDelta := float64(raw.CPUStats.SystemUsage - raw.PreCPUStats.SystemUsage)
+	if sysDelta > 0 && cpuDelta >= 0 {
+		cpuPercent = (cpuDelta / sysDelta) * float64(raw.CPUStats.OnlineCPUs) * 100.0
+	}
+
+	memPercent := 0.0
+	if raw.MemoryStats.Limit > 0 {
+		memPercent = float64(raw.MemoryStats.Usage) / float64(raw.MemoryStats.Limit) * 100.0
+	}
+
+	return models.SandboxStats{
+		CPU: math.Round(cpuPercent*100) / 100, // 2 decimal places
+		Memory: models.MemoryUsage{
+			Usage:   raw.MemoryStats.Usage,
+			Limit:   raw.MemoryStats.Limit,
+			Percent: math.Round(memPercent*100) / 100,
+		},
+		PIDs: raw.PidsStats.Current,
+	}, nil
 }
 
 // Exec runs a command inside a sandbox and returns combined stdout+stderr.

@@ -875,6 +875,52 @@ const docTemplate = `{
                 }
             }
         },
+        "/sandboxes/{id}/stats": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Returns a snapshot of CPU, memory and process usage for the sandbox.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sandboxes"
+                ],
+                "summary": "Get container stats",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.SandboxStats"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/sandboxes/{id}/stop": {
             "post": {
                 "security": [
@@ -1077,6 +1123,23 @@ const docTemplate = `{
                 }
             }
         },
+        "models.MemoryUsage": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "description": "bytes limit",
+                    "type": "integer"
+                },
+                "percent": {
+                    "description": "usage / limit * 100",
+                    "type": "number"
+                },
+                "usage": {
+                    "description": "bytes currently used",
+                    "type": "integer"
+                }
+            }
+        },
         "models.RenewExpirationRequest": {
             "type": "object",
             "required": [
@@ -1165,6 +1228,27 @@ const docTemplate = `{
                 },
                 "status": {
                     "type": "string"
+                }
+            }
+        },
+        "models.SandboxStats": {
+            "type": "object",
+            "properties": {
+                "cpu_percent": {
+                    "description": "CPU usage percentage",
+                    "type": "number"
+                },
+                "memory": {
+                    "description": "memory usage and limit",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.MemoryUsage"
+                        }
+                    ]
+                },
+                "pids": {
+                    "description": "number of running processes",
+                    "type": "integer"
                 }
             }
         }

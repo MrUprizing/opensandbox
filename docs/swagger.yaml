@@ -98,6 +98,18 @@ definitions:
       status:
         type: string
     type: object
+  models.MemoryUsage:
+    properties:
+      limit:
+        description: bytes limit
+        type: integer
+      percent:
+        description: usage / limit * 100
+        type: number
+      usage:
+        description: bytes currently used
+        type: integer
+    type: object
   models.RenewExpirationRequest:
     properties:
       timeout:
@@ -158,6 +170,19 @@ definitions:
         type: string
       status:
         type: string
+    type: object
+  models.SandboxStats:
+    properties:
+      cpu_percent:
+        description: CPU usage percentage
+        type: number
+      memory:
+        allOf:
+        - $ref: '#/definitions/models.MemoryUsage'
+        description: memory usage and limit
+      pids:
+        description: number of running processes
+        type: integer
     type: object
 host: localhost:8080
 info:
@@ -720,6 +745,35 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: Resume a sandbox
+      tags:
+      - sandboxes
+  /sandboxes/{id}/stats:
+    get:
+      description: Returns a snapshot of CPU, memory and process usage for the sandbox.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SandboxStats'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Get container stats
       tags:
       - sandboxes
   /sandboxes/{id}/stop:
