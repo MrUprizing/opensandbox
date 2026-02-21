@@ -145,7 +145,6 @@ func TestIntegration_NotFound(t *testing.T) {
 		{"POST", "/v1/sandboxes/nonexistent/restart", nil},
 		{"POST", "/v1/sandboxes/nonexistent/pause", nil},
 		{"POST", "/v1/sandboxes/nonexistent/resume", nil},
-		{"DELETE", "/v1/sandboxes/nonexistent", nil},
 		{"POST", "/v1/sandboxes/nonexistent/renew-expiration", map[string]any{"timeout": 60}},
 		{"POST", "/v1/sandboxes/nonexistent/exec", map[string]any{"cmd": []string{"echo"}}},
 	}
@@ -154,6 +153,10 @@ func TestIntegration_NotFound(t *testing.T) {
 		w := do(r, e.method, e.url, e.body)
 		assert.Equal(t, http.StatusNotFound, w.Code, "%s %s should return 404", e.method, e.url)
 	}
+
+	// DELETE is idempotent: removing a nonexistent sandbox cleans DB and returns 204.
+	w := do(r, "DELETE", "/v1/sandboxes/nonexistent", nil)
+	assert.Equal(t, http.StatusNoContent, w.Code, "DELETE nonexistent should return 204")
 }
 
 func TestIntegration_DefaultResourceLimits(t *testing.T) {
