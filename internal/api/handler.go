@@ -52,6 +52,11 @@ func (h *Handler) listSandboxes(c *gin.Context) {
 		return
 	}
 
+	if len(items) == 0 {
+		c.JSON(http.StatusOK, gin.H{"sandboxes": items, "message": "no sandboxes found"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"sandboxes": items})
 }
 
