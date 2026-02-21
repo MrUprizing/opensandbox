@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"io"
 
 	"open-sandbox/models"
 )
@@ -19,6 +20,7 @@ type DockerClient interface {
 	Resume(ctx context.Context, id string) error
 	RenewExpiration(ctx context.Context, id string, timeout int) error
 	Exec(ctx context.Context, id string, cmd []string) (string, error)
+	Logs(ctx context.Context, id string, opts models.LogsOptions) (io.ReadCloser, error)
 	ReadFile(ctx context.Context, id, path string) (string, error)
 	WriteFile(ctx context.Context, id, path, content string) error
 	DeleteFile(ctx context.Context, id, path string) error

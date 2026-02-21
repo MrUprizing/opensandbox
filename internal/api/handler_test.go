@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -33,6 +34,7 @@ type stub struct {
 	resume          func(string) error
 	renewExpiration func(string, int) error
 	exec            func(string, []string) (string, error)
+	logs            func(string, models.LogsOptions) (io.ReadCloser, error)
 	readFile        func(string, string) (string, error)
 	writeFile       func(string, string, string) error
 	deleteFile      func(string, string) error
@@ -68,6 +70,12 @@ func (s *stub) RenewExpiration(_ context.Context, id string, timeout int) error 
 }
 func (s *stub) Exec(_ context.Context, id string, cmd []string) (string, error) {
 	return s.exec(id, cmd)
+}
+func (s *stub) Logs(_ context.Context, id string, opts models.LogsOptions) (io.ReadCloser, error) {
+	if s.logs != nil {
+		return s.logs(id, opts)
+	}
+	return io.NopCloser(bytes.NewReader(nil)), nil
 }
 func (s *stub) ReadFile(_ context.Context, id, path string) (string, error) {
 	return s.readFile(id, path)
@@ -677,4 +685,109 @@ func TestCreateSandbox_ImageNotFound(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
 	assert.Contains(t, w.Body.String(), "image not found locally")
 	assert.Contains(t, w.Body.String(), "/v1/images/pull")
+}
+
+// ── Logs Tests ──────────────────────────────────────────────────────────────
+
+// muxFrame builds a Docker multiplexed log frame (8-byte header + payload).
+func muxFrame(streamType byte, data string) []byte {
+	payload := []byte(data)
+	frame := make([]byte, 8+len(payload))
+	frame[0] = streamType
+	frame[4] = byte(len(payload) >> 24)
+	frame[5] = byte(len(payload) >> 16)
+	frame[6] = byte(len(payload) >> 8)
+	frame[7] = byte(len(payload))
+	copy(frame[8:], payload)
+	return frame
+}
+
+func TestGetLogs_Snapshot(t *testing.T) {
+	// Build a multiplexed stream with stdout frames.
+	var buf bytes.Buffer
+	buf.Write(muxFrame(1, "line one\n"))
+	buf.Write(muxFrame(1, "line two\n"))
+	data := buf.Bytes()
+
+	r := newRouter(&stub{
+		logs: func(id string, opts models.LogsOptions) (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(data)), nil
+		},
+	})
+
+	w := do(r, "GET", "/v1/sandboxes/abc123/logs", nil)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "line one")
+	assert.Contains(t, w.Body.String(), "line two")
+}
+
+func TestGetLogs_NotFound(t *testing.T) {
+	r := newRouter(&stub{
+		logs: func(string, models.LogsOptions) (io.ReadCloser, error) {
+			return nil, docker.ErrNotFound
+		},
+	})
+
+	w := do(r, "GET", "/v1/sandboxes/nope/logs", nil)
+	assert.Equal(t, 404, w.Code)
+	assert.Contains(t, w.Body.String(), "NOT_FOUND")
+}
+
+func TestGetLogs_DefaultTail(t *testing.T) {
+	var capturedOpts models.LogsOptions
+	r := newRouter(&stub{
+		logs: func(id string, opts models.LogsOptions) (io.ReadCloser, error) {
+			capturedOpts = opts
+			return io.NopCloser(bytes.NewReader(nil)), nil
+		},
+	})
+
+	do(r, "GET", "/v1/sandboxes/abc123/logs", nil)
+	// Default tail is 0 (Go zero value) — the Docker client defaults to "100".
+	assert.Equal(t, 0, capturedOpts.Tail)
+	assert.False(t, capturedOpts.Follow)
+	assert.False(t, capturedOpts.Timestamps)
+}
+
+func TestGetLogs_CustomTail(t *testing.T) {
+	var capturedOpts models.LogsOptions
+	r := newRouter(&stub{
+		logs: func(id string, opts models.LogsOptions) (io.ReadCloser, error) {
+			capturedOpts = opts
+			return io.NopCloser(bytes.NewReader(nil)), nil
+		},
+	})
+
+	do(r, "GET", "/v1/sandboxes/abc123/logs?tail=50&timestamps=true", nil)
+	assert.Equal(t, 50, capturedOpts.Tail)
+	assert.True(t, capturedOpts.Timestamps)
+}
+
+func TestGetLogs_Follow_SSE(t *testing.T) {
+	// Create a stream that sends a few lines then closes.
+	var buf bytes.Buffer
+	buf.Write(muxFrame(1, "log line 1\n"))
+	buf.Write(muxFrame(1, "log line 2\n"))
+	data := buf.Bytes()
+
+	r := newRouter(&stub{
+		logs: func(id string, opts models.LogsOptions) (io.ReadCloser, error) {
+			assert.True(t, opts.Follow)
+			return io.NopCloser(bytes.NewReader(data)), nil
+		},
+	})
+
+	w := do(r, "GET", "/v1/sandboxes/abc123/logs?follow=true", nil)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Header().Get("Content-Type"), "text/event-stream")
+	assert.Contains(t, w.Body.String(), "log line 1")
+	assert.Contains(t, w.Body.String(), "log line 2")
+}
+
+func TestGetLogs_NegativeTail(t *testing.T) {
+	r := newRouter(&stub{})
+
+	w := do(r, "GET", "/v1/sandboxes/abc123/logs?tail=-5", nil)
+	assert.Equal(t, 400, w.Code)
+	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
 }

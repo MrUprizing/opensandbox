@@ -1,9 +1,13 @@
 package api
 
 import (
+	"bufio"
+	"bytes"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/moby/moby/api/pkg/stdcopy"
 	"open-sandbox/models"
 )
 
@@ -220,6 +224,88 @@ func (h *Handler) execSandbox(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, models.ExecResponse{Output: output})
+}
+
+// getLogs handles GET /v1/sandboxes/:id/logs.
+// @Summary      Get container logs
+// @Description  Returns container logs. Use follow=true for real-time SSE streaming.
+// @Tags         sandboxes
+// @Produce      json
+// @Produce      text/event-stream
+// @Param        id          path      string  true   "Sandbox ID"
+// @Param        tail        query     int     false  "Last N lines (default 100, 0 = all)"
+// @Param        follow      query     bool    false  "Stream logs in real-time via SSE"
+// @Param        timestamps  query     bool    false  "Include timestamps"
+// @Success      200  {object}  map[string]string  "logs output"
+// @Failure      400  {object}  ErrorResponse
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
+// @Router       /sandboxes/{id}/logs [get]
+func (h *Handler) getLogs(c *gin.Context) {
+	var opts models.LogsOptions
+	if err := c.ShouldBindQuery(&opts); err != nil {
+		badRequest(c, err.Error())
+		return
+	}
+
+	if opts.Tail < 0 {
+		badRequest(c, "tail must be >= 0")
+		return
+	}
+
+	rc, err := h.docker.Logs(c.Request.Context(), c.Param("id"), opts)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	defer rc.Close()
+
+	if opts.Follow {
+		h.streamLogsSSE(c, rc)
+		return
+	}
+
+	// Snapshot mode: demux the multiplexed stream and return as JSON.
+	var buf bytes.Buffer
+	if _, err := stdcopy.StdCopy(&buf, &buf, rc); err != nil {
+		// Fallback: if stdcopy fails (e.g. TTY container), read raw.
+		raw, _ := io.ReadAll(rc)
+		buf.Write(raw)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"logs": buf.String()})
+}
+
+// streamLogsSSE streams container logs as Server-Sent Events.
+func (h *Handler) streamLogsSSE(c *gin.Context, rc io.ReadCloser) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Status(http.StatusOK)
+
+	// Demux the multiplexed Docker log stream into plain text.
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		// StdCopy demultiplexes stdout+stderr into pw.
+		// If the container uses a TTY, this will fail — fallback to raw copy.
+		if _, err := stdcopy.StdCopy(pw, pw, rc); err != nil {
+			io.Copy(pw, rc)
+		}
+	}()
+
+	flusher, _ := c.Writer.(http.Flusher)
+	scanner := bufio.NewScanner(pr)
+	for scanner.Scan() {
+		if c.IsAborted() {
+			return
+		}
+		c.SSEvent("log", scanner.Text())
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
 }
 
 // readFile handles GET /v1/sandboxes/:id/files?path=<path>.

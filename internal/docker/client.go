@@ -349,6 +349,29 @@ func (c *Client) RenewExpiration(ctx context.Context, id string, timeout int) er
 	return nil
 }
 
+// Logs returns the container log stream. The caller must close the returned ReadCloser.
+// The stream is multiplexed (8-byte header per frame) when the container is not using a TTY.
+func (c *Client) Logs(ctx context.Context, id string, opts models.LogsOptions) (io.ReadCloser, error) {
+	tail := "100"
+	if opts.Tail > 0 {
+		tail = fmt.Sprintf("%d", opts.Tail)
+	} else if opts.Tail == 0 && opts.Follow {
+		tail = "0" // follow from now, no history
+	}
+
+	rc, err := c.cli.ContainerLogs(ctx, id, moby.ContainerLogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     opts.Follow,
+		Timestamps: opts.Timestamps,
+		Tail:       tail,
+	})
+	if err != nil {
+		return nil, wrapNotFound(err)
+	}
+	return rc, nil
+}
+
 // Exec runs a command inside a sandbox and returns combined stdout+stderr.
 func (c *Client) Exec(ctx context.Context, id string, cmd []string) (string, error) {
 	return c.execWithStdin(ctx, id, cmd, nil)

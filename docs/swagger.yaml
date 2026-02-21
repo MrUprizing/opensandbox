@@ -541,6 +541,54 @@ paths:
       summary: List a directory
       tags:
       - files
+  /sandboxes/{id}/logs:
+    get:
+      description: Returns container logs. Use follow=true for real-time SSE streaming.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Last N lines (default 100, 0 = all)
+        in: query
+        name: tail
+        type: integer
+      - description: Stream logs in real-time via SSE
+        in: query
+        name: follow
+        type: boolean
+      - description: Include timestamps
+        in: query
+        name: timestamps
+        type: boolean
+      produces:
+      - application/json
+      - text/event-stream
+      responses:
+        "200":
+          description: logs output
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Get container logs
+      tags:
+      - sandboxes
   /sandboxes/{id}/pause:
     post:
       description: Freeze all processes inside the sandbox.

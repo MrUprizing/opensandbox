@@ -44,3 +44,6 @@ temp/
 
 # SQLite database
 *.db
+
+# Private folder
+private

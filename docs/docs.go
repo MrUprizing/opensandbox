@@ -593,6 +593,80 @@ const docTemplate = `{
                 }
             }
         },
+        "/sandboxes/{id}/logs": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Returns container logs. Use follow=true for real-time SSE streaming.",
+                "produces": [
+                    "application/json",
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "sandboxes"
+                ],
+                "summary": "Get container logs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Last N lines (default 100, 0 = all)",
+                        "name": "tail",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Stream logs in real-time via SSE",
+                        "name": "follow",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Include timestamps",
+                        "name": "timestamps",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "logs output",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/sandboxes/{id}/pause": {
             "post": {
                 "security": [

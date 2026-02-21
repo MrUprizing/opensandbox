@@ -9,6 +9,7 @@ Open Sandbox lets you programmatically create Docker containers through a simple
 It's useful for:
 
 - **Code execution platforms** — Run untrusted code safely in isolated containers
+- **AI code generation** — Spin up isolated environments to execute AI-generated code safely
 - **Development environments** — Spin up temporary environments on the fly
 - **CI/CD tooling** — Create disposable build/test environments
 - **Prototyping** — Quickly test things inside containers without Docker CLI

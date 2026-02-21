@@ -106,6 +106,13 @@ type ImagePullResponse struct {
 	Image  string `json:"image"`
 }
 
+// LogsOptions configures container log retrieval.
+type LogsOptions struct {
+	Tail       int  `form:"tail"`       // last N lines (default 100, 0 = all)
+	Follow     bool `form:"follow"`     // stream in real-time via SSE
+	Timestamps bool `form:"timestamps"` // include timestamp per line
+}
+
 // ImageSummary is a concise view of a local Docker image.
 type ImageSummary struct {
 	ID   string   `json:"id"`
