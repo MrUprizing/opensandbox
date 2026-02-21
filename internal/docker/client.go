@@ -380,6 +380,8 @@ func (c *Client) ListDir(ctx context.Context, id, path string) (string, error) {
 }
 
 // PullImage pulls a Docker image from a registry and waits for completion.
+// It reads the JSON message stream to detect errors that the Docker daemon
+// reports inline (e.g. "no matching manifest for linux/amd64").
 func (c *Client) PullImage(ctx context.Context, image string) error {
 	resp, err := c.cli.ImagePull(ctx, image, moby.ImagePullOptions{})
 	if err != nil {
@@ -387,7 +389,23 @@ func (c *Client) PullImage(ctx context.Context, image string) error {
 	}
 	defer resp.Close()
 
-	return resp.Wait(ctx)
+	for msg, err := range resp.JSONMessages(ctx) {
+		if err != nil {
+			return err
+		}
+		if msg.Error != nil {
+			return fmt.Errorf("pull %s: %s", image, msg.Error.Message)
+		}
+	}
+
+	// Verify the image actually exists locally after pull.
+	if exists, err := c.ImageExists(ctx, image); err != nil {
+		return err
+	} else if !exists {
+		return fmt.Errorf("pull %s: image not available after pull", image)
+	}
+
+	return nil
 }
 
 // ListImages returns all locally available Docker images.
