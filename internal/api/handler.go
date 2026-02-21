@@ -408,3 +408,30 @@ func (h *Handler) renewExpiration(c *gin.Context) {
 
 	c.JSON(http.StatusOK, models.RenewExpirationResponse{Status: "renewed", Timeout: req.Timeout})
 }
+
+// pullImage handles POST /v1/images/pull.
+// @Summary      Pull a Docker image
+// @Description  Downloads a Docker image from a registry to use in sandboxes.
+// @Tags         images
+// @Accept       json
+// @Produce      json
+// @Param        body  body      models.ImagePullRequest  true  "Image to pull"
+// @Success      200   {object}  models.ImagePullResponse
+// @Failure      400   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Security     ApiKeyAuth
+// @Router       /images/pull [post]
+func (h *Handler) pullImage(c *gin.Context) {
+	var req models.ImagePullRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		badRequest(c, err.Error())
+		return
+	}
+
+	if err := h.docker.PullImage(c.Request.Context(), req.Image); err != nil {
+		internalError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, models.ImagePullResponse{Status: "pulled", Image: req.Image})
+}

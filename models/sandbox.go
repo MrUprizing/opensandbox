@@ -60,3 +60,14 @@ type RenewExpirationResponse struct {
 	Status  string `json:"status"`
 	Timeout int    `json:"timeout"`
 }
+
+// ImagePullRequest is the body for POST /v1/images/pull
+type ImagePullRequest struct {
+	Image string `json:"image" binding:"required"` // image name with optional tag (e.g. "nginx:latest")
+}
+
+// ImagePullResponse is the response for POST /v1/images/pull
+type ImagePullResponse struct {
+	Status string `json:"status"`
+	Image  string `json:"image"`
+}

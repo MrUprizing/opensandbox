@@ -24,4 +24,5 @@ type DockerClient interface {
 	WriteFile(ctx context.Context, id, path, content string) error
 	DeleteFile(ctx context.Context, id, path string) error
 	ListDir(ctx context.Context, id, path string) (string, error)
+	PullImage(ctx context.Context, image string) error
 }

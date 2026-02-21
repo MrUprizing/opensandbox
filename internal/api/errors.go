@@ -26,9 +26,14 @@ func notFound(c *gin.Context, resource string) {
 
 // internalError writes a 500 response with code INTERNAL_ERROR.
 // If err is docker.ErrNotFound it downgrades to a 404 notFound response instead.
+// If err is docker.ErrImageNotFound it downgrades to a 400 badRequest response.
 func internalError(c *gin.Context, err error) {
 	if errors.Is(err, docker.ErrNotFound) {
 		notFound(c, "sandbox")
+		return
+	}
+	if errors.Is(err, docker.ErrImageNotFound) {
+		badRequest(c, "image not found locally, use POST /v1/images/pull to download it first")
 		return
 	}
 	c.JSON(http.StatusInternalServerError, ErrorResponse{Code: "INTERNAL_ERROR", Message: err.Error()})

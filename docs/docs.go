@@ -47,6 +47,57 @@ const docTemplate = `{
                 }
             }
         },
+        "/images/pull": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Downloads a Docker image from a registry to use in sandboxes.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "images"
+                ],
+                "summary": "Pull a Docker image",
+                "parameters": [
+                    {
+                        "description": "Image to pull",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ImagePullRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.ImagePullResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/sandboxes": {
             "get": {
                 "security": [
@@ -826,7 +877,7 @@ const docTemplate = `{
                     }
                 },
                 "resources": {
-                    "description": "CPU/memory limits, nil = no limits",
+                    "description": "CPU/memory limits, nil = defaults (1GB RAM, 1 vCPU)",
                     "allOf": [
                         {
                             "$ref": "#/definitions/models.ResourceLimits"
@@ -909,6 +960,29 @@ const docTemplate = `{
                 }
             }
         },
+        "models.ImagePullRequest": {
+            "type": "object",
+            "required": [
+                "image"
+            ],
+            "properties": {
+                "image": {
+                    "description": "image name with optional tag (e.g. \"nginx:latest\")",
+                    "type": "string"
+                }
+            }
+        },
+        "models.ImagePullResponse": {
+            "type": "object",
+            "properties": {
+                "image": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "models.RenewExpirationRequest": {
             "type": "object",
             "required": [
@@ -936,11 +1010,11 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "cpus": {
-                    "description": "fractional CPU limit (e.g. 1.5)",
+                    "description": "fractional CPU limit (e.g. 1.5). Default: 1.0, Max: 4.0",
                     "type": "number"
                 },
                 "memory": {
-                    "description": "memory limit in MB (e.g. 512 = 512MB)",
+                    "description": "memory limit in MB (e.g. 512 = 512MB). Default: 1024 (1GB), Max: 8192 (8GB)",
                     "type": "integer"
                 }
             }

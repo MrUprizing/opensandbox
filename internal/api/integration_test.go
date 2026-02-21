@@ -27,7 +27,7 @@ func realRouter() *gin.Engine {
 func TestIntegration_FullLifecycle(t *testing.T) {
 	r := realRouter()
 
-	// 1. Create a sandbox using a lightweight image.
+	// 1. Create a sandbox using a lightweight image (assumes nextjs-docker:latest is already available locally).
 	w := do(r, "POST", "/v1/sandboxes", map[string]any{
 		"image":   "nextjs-docker:latest",
 		"cmd":     []string{"sleep", "300"},
@@ -145,7 +145,7 @@ func TestIntegration_NotFound(t *testing.T) {
 func TestIntegration_DefaultResourceLimits(t *testing.T) {
 	r := realRouter()
 
-	// Create a sandbox without specifying resource limits
+	// Create a sandbox without specifying resource limits (assumes nextjs-docker:latest is already available locally)
 	w := do(r, "POST", "/v1/sandboxes", map[string]any{
 		"image":   "nextjs-docker:latest",
 		"cmd":     []string{"sleep", "60"},
@@ -177,4 +177,23 @@ func TestIntegration_DefaultResourceLimits(t *testing.T) {
 	// Verify HostConfig.NanoCpus = 1 CPU (1e9 nanocpus)
 	nanoCPUs := int64(hostConfig["NanoCpus"].(float64))
 	assert.Equal(t, int64(1e9), nanoCPUs, "Default CPUs should be 1 vCPU")
+}
+
+func TestIntegration_ImagePull(t *testing.T) {
+	r := realRouter()
+
+	// Test pulling a lightweight image
+	testImage := "busybox:1.36.1"
+
+	w := do(r, "POST", "/v1/images/pull", map[string]any{
+		"image": testImage,
+	})
+	require.Equal(t, http.StatusOK, w.Code, "pull should return 200: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "pulled")
+	assert.Contains(t, w.Body.String(), testImage)
+
+	var response models.ImagePullResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Equal(t, "pulled", response.Status)
+	assert.Equal(t, testImage, response.Image)
 }

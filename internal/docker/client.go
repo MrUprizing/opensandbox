@@ -72,7 +72,17 @@ func (c *Client) List(ctx context.Context, all bool) ([]container.Summary, error
 
 // Create creates and starts a sandbox. Docker assigns host ports automatically.
 // Applies optional resource limits and schedules auto-stop with a default TTL of 15 minutes.
+// Returns ErrImageNotFound if the image does not exist locally.
 func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (models.CreateSandboxResponse, error) {
+	// Verify image exists locally
+	exists, err := c.ImageExists(ctx, req.Image)
+	if err != nil {
+		return models.CreateSandboxResponse{}, err
+	}
+	if !exists {
+		return models.CreateSandboxResponse{}, ErrImageNotFound
+	}
+
 	cfg := &container.Config{
 		Image:        req.Image,
 		Env:          req.Env,
@@ -213,6 +223,31 @@ func (c *Client) DeleteFile(ctx context.Context, id, path string) error {
 // ListDir lists the contents of a directory inside a sandbox.
 func (c *Client) ListDir(ctx context.Context, id, path string) (string, error) {
 	return c.Exec(ctx, id, []string{"ls", "-la", path})
+}
+
+// PullImage pulls a Docker image from a registry.
+func (c *Client) PullImage(ctx context.Context, image string) error {
+	reader, err := c.cli.ImagePull(ctx, image, moby.ImagePullOptions{})
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	// Wait for pull to complete by reading all output
+	_, err = io.Copy(io.Discard, reader)
+	return err
+}
+
+// ImageExists checks if an image exists locally.
+func (c *Client) ImageExists(ctx context.Context, image string) (bool, error) {
+	_, err := c.cli.ImageInspect(ctx, image)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // execWithStdin runs a command with optional stdin.

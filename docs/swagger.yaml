@@ -31,7 +31,7 @@ definitions:
       resources:
         allOf:
         - $ref: '#/definitions/models.ResourceLimits'
-        description: CPU/memory limits, nil = no limits
+        description: CPU/memory limits, nil = defaults (1GB RAM, 1 vCPU)
       timeout:
         description: seconds until auto-stop, 0 = default (900s)
         type: integer
@@ -83,6 +83,21 @@ definitions:
     required:
     - content
     type: object
+  models.ImagePullRequest:
+    properties:
+      image:
+        description: image name with optional tag (e.g. "nginx:latest")
+        type: string
+    required:
+    - image
+    type: object
+  models.ImagePullResponse:
+    properties:
+      image:
+        type: string
+      status:
+        type: string
+    type: object
   models.RenewExpirationRequest:
     properties:
       timeout:
@@ -101,10 +116,11 @@ definitions:
   models.ResourceLimits:
     properties:
       cpus:
-        description: fractional CPU limit (e.g. 1.5)
+        description: 'fractional CPU limit (e.g. 1.5). Default: 1.0, Max: 4.0'
         type: number
       memory:
-        description: memory limit in MB (e.g. 512 = 512MB)
+        description: 'memory limit in MB (e.g. 512 = 512MB). Default: 1024 (1GB),
+          Max: 8192 (8GB)'
         type: integer
     type: object
 host: localhost:8080
@@ -136,6 +152,38 @@ paths:
       summary: Health check
       tags:
       - system
+  /images/pull:
+    post:
+      consumes:
+      - application/json
+      description: Downloads a Docker image from a registry to use in sandboxes.
+      parameters:
+      - description: Image to pull
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/models.ImagePullRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ImagePullResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Pull a Docker image
+      tags:
+      - images
   /sandboxes:
     get:
       description: List all active sandboxes. Use ?all=true to include stopped containers.

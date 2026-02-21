@@ -38,6 +38,7 @@ type stub struct {
 	writeFile       func(string, string, string) error
 	deleteFile      func(string, string) error
 	listDir         func(string, string) (string, error)
+	pullImage       func(string) error
 }
 
 func (s *stub) Ping(_ context.Context) error {
@@ -75,6 +76,12 @@ func (s *stub) WriteFile(_ context.Context, id, path, content string) error {
 func (s *stub) DeleteFile(_ context.Context, id, path string) error { return s.deleteFile(id, path) }
 func (s *stub) ListDir(_ context.Context, id, path string) (string, error) {
 	return s.listDir(id, path)
+}
+func (s *stub) PullImage(_ context.Context, image string) error {
+	if s.pullImage != nil {
+		return s.pullImage(image)
+	}
+	return nil
 }
 
 // newRouter builds a Gin engine with all sandbox routes registered for the given client.
@@ -555,4 +562,61 @@ func TestHealthCheck_NoAuthRequired(t *testing.T) {
 	w := do(r, "GET", "/health", nil)
 	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), "healthy")
+}
+
+func TestPullImage(t *testing.T) {
+	var capturedImage string
+	r := newRouter(&stub{
+		pullImage: func(image string) error {
+			capturedImage = image
+			return nil
+		},
+	})
+
+	w := do(r, "POST", "/v1/images/pull", map[string]any{
+		"image": "nginx:latest",
+	})
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "pulled")
+	assert.Contains(t, w.Body.String(), "nginx:latest")
+	assert.Equal(t, "nginx:latest", capturedImage)
+}
+
+func TestPullImage_MissingImage(t *testing.T) {
+	r := newRouter(&stub{})
+
+	w := do(r, "POST", "/v1/images/pull", map[string]any{})
+	assert.Equal(t, 400, w.Code)
+	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+}
+
+func TestPullImage_Error(t *testing.T) {
+	r := newRouter(&stub{
+		pullImage: func(string) error {
+			return errors.New("registry unreachable")
+		},
+	})
+
+	w := do(r, "POST", "/v1/images/pull", map[string]any{
+		"image": "nginx:latest",
+	})
+	assert.Equal(t, 500, w.Code)
+	assert.Contains(t, w.Body.String(), "INTERNAL_ERROR")
+	assert.Contains(t, w.Body.String(), "registry unreachable")
+}
+
+func TestCreateSandbox_ImageNotFound(t *testing.T) {
+	r := newRouter(&stub{
+		create: func(models.CreateSandboxRequest) (models.CreateSandboxResponse, error) {
+			return models.CreateSandboxResponse{}, docker.ErrImageNotFound
+		},
+	})
+
+	w := do(r, "POST", "/v1/sandboxes", map[string]any{
+		"image": "nonexistent:latest",
+	})
+	assert.Equal(t, 400, w.Code)
+	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+	assert.Contains(t, w.Body.String(), "image not found locally")
+	assert.Contains(t, w.Body.String(), "/v1/images/pull")
 }

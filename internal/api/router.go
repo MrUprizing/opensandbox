@@ -24,4 +24,7 @@ func (h *Handler) RegisterRoutes(v1 *gin.RouterGroup) {
 	sb.PUT("/:id/files", h.writeFile)
 	sb.DELETE("/:id/files", h.deleteFile)
 	sb.GET("/:id/files/list", h.listDir)
+
+	img := v1.Group("/images")
+	img.POST("/pull", h.pullImage)
 }
