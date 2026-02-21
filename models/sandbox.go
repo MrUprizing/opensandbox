@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 // ResourceLimits defines CPU and memory constraints for a sandbox.
 type ResourceLimits struct {
 	Memory int64   `json:"memory"` // memory limit in MB (e.g. 512 = 512MB). Default: 1024 (1GB), Max: 8192 (8GB)
@@ -21,6 +23,38 @@ type CreateSandboxRequest struct {
 type CreateSandboxResponse struct {
 	ID    string            `json:"id"`
 	Ports map[string]string `json:"ports"` // "80/tcp": "32768"
+}
+
+// SandboxSummary is a concise view of a sandbox for list endpoints.
+type SandboxSummary struct {
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Image     string            `json:"image"`
+	Status    string            `json:"status"`
+	State     string            `json:"state"`
+	Ports     map[string]string `json:"ports"`
+	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
+}
+
+// SandboxDetail is the full inspect response with only relevant fields.
+type SandboxDetail struct {
+	ID         string            `json:"id"`
+	Name       string            `json:"name"`
+	Image      string            `json:"image"`
+	Status     string            `json:"status"`
+	Running    bool              `json:"running"`
+	Ports      map[string]string `json:"ports"`
+	Resources  ResourceLimits    `json:"resources"`
+	StartedAt  string            `json:"started_at"`
+	FinishedAt string            `json:"finished_at"`
+	ExpiresAt  *time.Time        `json:"expires_at,omitempty"`
+}
+
+// RestartResponse is the response for POST /v1/sandboxes/:id/restart
+type RestartResponse struct {
+	Status    string            `json:"status"`
+	Ports     map[string]string `json:"ports"`
+	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
 }
 
 // ExecRequest is the body for POST /v1/sandboxes/:id/exec

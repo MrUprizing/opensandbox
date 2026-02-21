@@ -111,11 +111,11 @@ func (h *Handler) createSandbox(c *gin.Context) {
 
 // getSandbox handles GET /v1/sandboxes/:id.
 // @Summary      Inspect a sandbox
-// @Description  Returns full Docker inspect data for the sandbox.
+// @Description  Returns detailed info about the sandbox including ports, resources, and expiration.
 // @Tags         sandboxes
 // @Produce      json
 // @Param        id   path      string  true  "Sandbox ID"
-// @Success      200  {object}  map[string]interface{}  "Docker inspect response"
+// @Success      200  {object}  models.SandboxDetail
 // @Failure      404  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
 // @Security     ApiKeyAuth
@@ -152,22 +152,23 @@ func (h *Handler) stopSandbox(c *gin.Context) {
 
 // restartSandbox handles POST /v1/sandboxes/:id/restart.
 // @Summary      Restart a sandbox
-// @Description  Restart a sandbox (stop + start).
+// @Description  Restart a sandbox (stop + start). Returns the new port mappings and a fresh expiration timer.
 // @Tags         sandboxes
 // @Produce      json
 // @Param        id   path      string  true  "Sandbox ID"
-// @Success      200  {object}  map[string]string  "status: restarted"
+// @Success      200  {object}  models.RestartResponse
 // @Failure      404  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
 // @Security     ApiKeyAuth
 // @Router       /sandboxes/{id}/restart [post]
 func (h *Handler) restartSandbox(c *gin.Context) {
-	if err := h.docker.Restart(c.Request.Context(), c.Param("id")); err != nil {
+	result, err := h.docker.Restart(c.Request.Context(), c.Param("id"))
+	if err != nil {
 		internalError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "restarted"})
+	c.JSON(http.StatusOK, result)
 }
 
 // deleteSandbox handles DELETE /v1/sandboxes/:id.

@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/moby/moby/api/types/container"
 	"github.com/stretchr/testify/assert"
 	"open-sandbox/internal/api"
 	"open-sandbox/internal/docker"
@@ -24,11 +23,11 @@ func init() { gin.SetMode(gin.TestMode) }
 // If a nil method is called unexpectedly the test will panic, making the gap obvious.
 type stub struct {
 	ping            func() error
-	list            func(bool) ([]container.Summary, error)
+	list            func(bool) ([]models.SandboxSummary, error)
 	create          func(models.CreateSandboxRequest) (models.CreateSandboxResponse, error)
-	inspect         func(string) (container.InspectResponse, error)
+	inspect         func(string) (models.SandboxDetail, error)
 	stop            func(string) error
-	restart         func(string) error
+	restart         func(string) (models.RestartResponse, error)
 	remove          func(string) error
 	pause           func(string) error
 	resume          func(string) error
@@ -47,20 +46,22 @@ func (s *stub) Ping(_ context.Context) error {
 	}
 	return nil
 }
-func (s *stub) List(_ context.Context, all bool) ([]container.Summary, error) {
+func (s *stub) List(_ context.Context, all bool) ([]models.SandboxSummary, error) {
 	return s.list(all)
 }
 func (s *stub) Create(_ context.Context, r models.CreateSandboxRequest) (models.CreateSandboxResponse, error) {
 	return s.create(r)
 }
-func (s *stub) Inspect(_ context.Context, id string) (container.InspectResponse, error) {
+func (s *stub) Inspect(_ context.Context, id string) (models.SandboxDetail, error) {
 	return s.inspect(id)
 }
-func (s *stub) Stop(_ context.Context, id string) error    { return s.stop(id) }
-func (s *stub) Restart(_ context.Context, id string) error { return s.restart(id) }
-func (s *stub) Remove(_ context.Context, id string) error  { return s.remove(id) }
-func (s *stub) Pause(_ context.Context, id string) error   { return s.pause(id) }
-func (s *stub) Resume(_ context.Context, id string) error  { return s.resume(id) }
+func (s *stub) Stop(_ context.Context, id string) error { return s.stop(id) }
+func (s *stub) Restart(_ context.Context, id string) (models.RestartResponse, error) {
+	return s.restart(id)
+}
+func (s *stub) Remove(_ context.Context, id string) error { return s.remove(id) }
+func (s *stub) Pause(_ context.Context, id string) error  { return s.pause(id) }
+func (s *stub) Resume(_ context.Context, id string) error { return s.resume(id) }
 func (s *stub) RenewExpiration(_ context.Context, id string, timeout int) error {
 	return s.renewExpiration(id, timeout)
 }
@@ -136,8 +137,8 @@ func doWithAuth(r *gin.Engine, method, url string, body any, token string) *http
 
 func TestListSandboxes(t *testing.T) {
 	r := newRouter(&stub{
-		list: func(bool) ([]container.Summary, error) {
-			return []container.Summary{{ID: "abc123"}}, nil
+		list: func(bool) ([]models.SandboxSummary, error) {
+			return []models.SandboxSummary{{ID: "abc123", Name: "test", Image: "nginx", Status: "running", State: "running"}}, nil
 		},
 	})
 
@@ -168,14 +169,44 @@ func TestCreateSandbox_MissingImage(t *testing.T) {
 
 func TestGetSandbox_NotFound(t *testing.T) {
 	r := newRouter(&stub{
-		inspect: func(string) (container.InspectResponse, error) {
-			return container.InspectResponse{}, docker.ErrNotFound
+		inspect: func(string) (models.SandboxDetail, error) {
+			return models.SandboxDetail{}, docker.ErrNotFound
 		},
 	})
 
 	w := do(r, "GET", "/v1/sandboxes/nope", nil)
 	assert.Equal(t, 404, w.Code)
 	assert.Contains(t, w.Body.String(), "NOT_FOUND")
+}
+
+func TestGetSandbox_ReturnsDetail(t *testing.T) {
+	r := newRouter(&stub{
+		inspect: func(id string) (models.SandboxDetail, error) {
+			return models.SandboxDetail{
+				ID:      id,
+				Name:    "my-sandbox",
+				Image:   "nginx:latest",
+				Status:  "running",
+				Running: true,
+				Ports:   map[string]string{"80/tcp": "32770"},
+				Resources: models.ResourceLimits{
+					Memory: 1024,
+					CPUs:   1.0,
+				},
+				StartedAt: "2026-02-21T02:00:18Z",
+			}, nil
+		},
+	})
+
+	w := do(r, "GET", "/v1/sandboxes/abc123", nil)
+	assert.Equal(t, 200, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, "my-sandbox")
+	assert.Contains(t, body, "32770")
+	assert.Contains(t, body, "running")
+	// Should NOT contain raw Docker inspect noise
+	assert.NotContains(t, body, "HostConfig")
+	assert.NotContains(t, body, "GraphDriver")
 }
 
 func TestDeleteSandbox(t *testing.T) {
@@ -199,12 +230,32 @@ func TestStopSandbox(t *testing.T) {
 
 func TestRestartSandbox(t *testing.T) {
 	r := newRouter(&stub{
-		restart: func(string) error { return nil },
+		restart: func(string) (models.RestartResponse, error) {
+			return models.RestartResponse{
+				Status: "restarted",
+				Ports:  map[string]string{"3000/tcp": "32775"},
+			}, nil
+		},
 	})
 
 	w := do(r, "POST", "/v1/sandboxes/abc123/restart", nil)
 	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Body.String(), "restarted")
+	body := w.Body.String()
+	assert.Contains(t, body, "restarted")
+	assert.Contains(t, body, "32775")
+	assert.Contains(t, body, "ports")
+}
+
+func TestRestartSandbox_NotFound(t *testing.T) {
+	r := newRouter(&stub{
+		restart: func(string) (models.RestartResponse, error) {
+			return models.RestartResponse{}, docker.ErrNotFound
+		},
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/nope/restart", nil)
+	assert.Equal(t, 404, w.Code)
+	assert.Contains(t, w.Body.String(), "NOT_FOUND")
 }
 
 func TestExecSandbox(t *testing.T) {
@@ -278,7 +329,7 @@ func TestListDir(t *testing.T) {
 
 func TestInternalError(t *testing.T) {
 	r := newRouter(&stub{
-		list: func(bool) ([]container.Summary, error) {
+		list: func(bool) ([]models.SandboxSummary, error) {
 			return nil, errors.New("daemon unreachable")
 		},
 	})
@@ -484,8 +535,8 @@ func TestRenewExpiration_ZeroTimeout(t *testing.T) {
 
 func TestApiKeyAuth_NoHeader(t *testing.T) {
 	r := newAuthRouter(&stub{
-		list: func(bool) ([]container.Summary, error) {
-			return []container.Summary{}, nil
+		list: func(bool) ([]models.SandboxSummary, error) {
+			return []models.SandboxSummary{}, nil
 		},
 	}, "sk-test-123")
 
@@ -496,8 +547,8 @@ func TestApiKeyAuth_NoHeader(t *testing.T) {
 
 func TestApiKeyAuth_WrongKey(t *testing.T) {
 	r := newAuthRouter(&stub{
-		list: func(bool) ([]container.Summary, error) {
-			return []container.Summary{}, nil
+		list: func(bool) ([]models.SandboxSummary, error) {
+			return []models.SandboxSummary{}, nil
 		},
 	}, "sk-test-123")
 
@@ -508,8 +559,8 @@ func TestApiKeyAuth_WrongKey(t *testing.T) {
 
 func TestApiKeyAuth_CorrectKey(t *testing.T) {
 	r := newAuthRouter(&stub{
-		list: func(bool) ([]container.Summary, error) {
-			return []container.Summary{{ID: "abc123"}}, nil
+		list: func(bool) ([]models.SandboxSummary, error) {
+			return []models.SandboxSummary{{ID: "abc123"}}, nil
 		},
 	}, "sk-test-123")
 
@@ -520,8 +571,8 @@ func TestApiKeyAuth_CorrectKey(t *testing.T) {
 
 func TestNoAuth_WorksWithoutMiddleware(t *testing.T) {
 	r := newRouter(&stub{
-		list: func(bool) ([]container.Summary, error) {
-			return []container.Summary{{ID: "abc123"}}, nil
+		list: func(bool) ([]models.SandboxSummary, error) {
+			return []models.SandboxSummary{{ID: "abc123"}}, nil
 		},
 	})
 

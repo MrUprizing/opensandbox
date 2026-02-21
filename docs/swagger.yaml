@@ -123,6 +123,42 @@ definitions:
           Max: 8192 (8GB)'
         type: integer
     type: object
+  models.RestartResponse:
+    properties:
+      expires_at:
+        type: string
+      ports:
+        additionalProperties:
+          type: string
+        type: object
+      status:
+        type: string
+    type: object
+  models.SandboxDetail:
+    properties:
+      expires_at:
+        type: string
+      finished_at:
+        type: string
+      id:
+        type: string
+      image:
+        type: string
+      name:
+        type: string
+      ports:
+        additionalProperties:
+          type: string
+        type: object
+      resources:
+        $ref: '#/definitions/models.ResourceLimits'
+      running:
+        type: boolean
+      started_at:
+        type: string
+      status:
+        type: string
+    type: object
 host: localhost:8080
 info:
   contact: {}
@@ -267,7 +303,8 @@ paths:
       tags:
       - sandboxes
     get:
-      description: Returns full Docker inspect data for the sandbox.
+      description: Returns detailed info about the sandbox including ports, resources,
+        and expiration.
       parameters:
       - description: Sandbox ID
         in: path
@@ -278,10 +315,9 @@ paths:
       - application/json
       responses:
         "200":
-          description: Docker inspect response
+          description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/models.SandboxDetail'
         "404":
           description: Not Found
           schema:
@@ -564,7 +600,8 @@ paths:
       - sandboxes
   /sandboxes/{id}/restart:
     post:
-      description: Restart a sandbox (stop + start).
+      description: Restart a sandbox (stop + start). Returns the new port mappings
+        and a fresh expiration timer.
       parameters:
       - description: Sandbox ID
         in: path
@@ -575,11 +612,9 @@ paths:
       - application/json
       responses:
         "200":
-          description: 'status: restarted'
+          description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/models.RestartResponse'
         "404":
           description: Not Found
           schema:

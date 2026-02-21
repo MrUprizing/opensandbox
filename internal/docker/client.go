@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -19,7 +20,14 @@ import (
 // Client wraps the Docker SDK and exposes sandbox operations.
 type Client struct {
 	cli    *moby.Client
-	timers sync.Map // map[containerID]*time.Timer
+	timers sync.Map // map[containerID]*timerEntry
+}
+
+// timerEntry holds a timer and a cancel channel to avoid goroutine leaks.
+type timerEntry struct {
+	timer     *time.Timer
+	cancel    chan struct{}
+	expiresAt time.Time
 }
 
 // defaultTimeout is applied when no timeout is specified (15 minutes).
@@ -62,12 +70,41 @@ func (c *Client) Ping(ctx context.Context) error {
 }
 
 // List returns all sandboxes. Set all=true to include stopped ones.
-func (c *Client) List(ctx context.Context, all bool) ([]container.Summary, error) {
+func (c *Client) List(ctx context.Context, all bool) ([]models.SandboxSummary, error) {
 	result, err := c.cli.ContainerList(ctx, moby.ContainerListOptions{All: all})
 	if err != nil {
 		return nil, err
 	}
-	return result.Items, nil
+
+	summaries := make([]models.SandboxSummary, 0, len(result.Items))
+	for _, item := range result.Items {
+		ports := make(map[string]string)
+		for _, p := range item.Ports {
+			if p.PublicPort > 0 {
+				key := portKey(p.PrivatePort, p.Type)
+				ports[key] = portValue(p.PublicPort)
+			}
+		}
+
+		s := models.SandboxSummary{
+			ID:     item.ID,
+			Name:   containerName(item.Names),
+			Image:  item.Image,
+			Status: item.Status,
+			State:  string(item.State),
+			Ports:  ports,
+		}
+
+		// Attach expiration info if tracked.
+		if entry := c.getTimerEntry(item.ID); entry != nil {
+			ea := entry.expiresAt
+			s.ExpiresAt = &ea
+		}
+
+		summaries = append(summaries, s)
+	}
+
+	return summaries, nil
 }
 
 // Create creates and starts a sandbox. Docker assigns host ports automatically.
@@ -142,13 +179,35 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 	}, nil
 }
 
-// Inspect returns detailed info about a sandbox.
-func (c *Client) Inspect(ctx context.Context, id string) (container.InspectResponse, error) {
+// Inspect returns a curated view of a sandbox.
+func (c *Client) Inspect(ctx context.Context, id string) (models.SandboxDetail, error) {
 	result, err := c.cli.ContainerInspect(ctx, id, moby.ContainerInspectOptions{})
 	if err != nil {
-		return container.InspectResponse{}, wrapNotFound(err)
+		return models.SandboxDetail{}, wrapNotFound(err)
 	}
-	return result.Container, nil
+
+	info := result.Container
+	detail := models.SandboxDetail{
+		ID:      info.ID,
+		Name:    strings.TrimPrefix(info.Name, "/"),
+		Image:   info.Config.Image,
+		Status:  string(info.State.Status),
+		Running: info.State.Running,
+		Ports:   extractPorts(info.NetworkSettings.Ports),
+		Resources: models.ResourceLimits{
+			Memory: info.HostConfig.Memory / (1024 * 1024), // bytes to MB
+			CPUs:   float64(info.HostConfig.NanoCPUs) / 1e9,
+		},
+		StartedAt:  info.State.StartedAt,
+		FinishedAt: info.State.FinishedAt,
+	}
+
+	if entry := c.getTimerEntry(id); entry != nil {
+		ea := entry.expiresAt
+		detail.ExpiresAt = &ea
+	}
+
+	return detail, nil
 }
 
 // Stop stops a running sandbox and cancels its expiration timer.
@@ -158,10 +217,35 @@ func (c *Client) Stop(ctx context.Context, id string) error {
 	return wrapNotFound(err)
 }
 
-// Restart restarts a sandbox.
-func (c *Client) Restart(ctx context.Context, id string) error {
-	_, err := c.cli.ContainerRestart(ctx, id, moby.ContainerRestartOptions{})
-	return wrapNotFound(err)
+// Restart restarts a sandbox and returns the new port mappings.
+// It cancels any existing timer and schedules a fresh one with the default timeout.
+func (c *Client) Restart(ctx context.Context, id string) (models.RestartResponse, error) {
+	c.cancelTimer(id)
+
+	if _, err := c.cli.ContainerRestart(ctx, id, moby.ContainerRestartOptions{}); err != nil {
+		return models.RestartResponse{}, wrapNotFound(err)
+	}
+
+	// Re-schedule auto-stop with the default timeout.
+	c.scheduleStop(id, defaultTimeout)
+
+	// Inspect to get the new ports.
+	info, err := c.cli.ContainerInspect(ctx, id, moby.ContainerInspectOptions{})
+	if err != nil {
+		return models.RestartResponse{}, wrapNotFound(err)
+	}
+
+	var expiresAt *time.Time
+	if entry := c.getTimerEntry(id); entry != nil {
+		ea := entry.expiresAt
+		expiresAt = &ea
+	}
+
+	return models.RestartResponse{
+		Status:    "restarted",
+		Ports:     extractPorts(info.Container.NetworkSettings.Ports),
+		ExpiresAt: expiresAt,
+	}, nil
 }
 
 // Remove removes a sandbox forcefully and cancels its expiration timer.
@@ -250,6 +334,20 @@ func (c *Client) ImageExists(ctx context.Context, image string) (bool, error) {
 	return true, nil
 }
 
+// Shutdown cancels all pending timers and stops tracked containers.
+// Called during graceful shutdown to prevent orphaned containers.
+func (c *Client) Shutdown(ctx context.Context) {
+	c.timers.Range(func(key, value any) bool {
+		id := key.(string)
+		entry := value.(*timerEntry)
+		entry.timer.Stop()
+		close(entry.cancel)
+		c.timers.Delete(id)
+		c.cli.ContainerStop(ctx, id, moby.ContainerStopOptions{})
+		return true
+	})
+}
+
 // execWithStdin runs a command with optional stdin.
 func (c *Client) execWithStdin(ctx context.Context, id string, cmd []string, stdin io.Reader) (string, error) {
 	attachStdin := stdin != nil
@@ -285,21 +383,49 @@ func (c *Client) execWithStdin(ctx context.Context, id string, cmd []string, std
 }
 
 // scheduleStop creates a timer that auto-stops the sandbox after the given seconds.
+// Uses a cancel channel so cancelTimer can cleanly terminate the goroutine.
 func (c *Client) scheduleStop(id string, seconds int) {
-	timer := time.NewTimer(time.Duration(seconds) * time.Second)
-	c.timers.Store(id, timer)
+	d := time.Duration(seconds) * time.Second
+	timer := time.NewTimer(d)
+	cancel := make(chan struct{})
+
+	c.timers.Store(id, &timerEntry{
+		timer:     timer,
+		cancel:    cancel,
+		expiresAt: time.Now().Add(d),
+	})
+
 	go func() {
-		<-timer.C
-		c.timers.Delete(id)
-		c.cli.ContainerStop(context.Background(), id, moby.ContainerStopOptions{})
+		select {
+		case <-timer.C:
+			c.timers.Delete(id)
+			c.cli.ContainerStop(context.Background(), id, moby.ContainerStopOptions{})
+		case <-cancel:
+			// Timer was cancelled; stop it and drain the channel if needed.
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		}
 	}()
 }
 
 // cancelTimer stops and removes the expiration timer for a sandbox.
 func (c *Client) cancelTimer(id string) {
 	if v, ok := c.timers.LoadAndDelete(id); ok {
-		v.(*time.Timer).Stop()
+		entry := v.(*timerEntry)
+		close(entry.cancel)
 	}
+}
+
+// getTimerEntry returns the timer entry for a sandbox, or nil if not tracked.
+func (c *Client) getTimerEntry(id string) *timerEntry {
+	if v, ok := c.timers.Load(id); ok {
+		return v.(*timerEntry)
+	}
+	return nil
 }
 
 // wrapNotFound converts Docker "not found" errors to ErrNotFound.
@@ -338,4 +464,25 @@ func extractPorts(pm network.PortMap) map[string]string {
 		}
 	}
 	return out
+}
+
+// containerName extracts a clean name from Docker's name list (removes leading /).
+func containerName(names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	return strings.TrimPrefix(names[0], "/")
+}
+
+// portKey builds a port key like "3000/tcp".
+func portKey(port uint16, proto string) string {
+	if proto == "" {
+		proto = "tcp"
+	}
+	return portValue(port) + "/" + proto
+}
+
+// portValue converts a uint16 port to its string representation.
+func portValue(port uint16) string {
+	return fmt.Sprintf("%d", port)
 }

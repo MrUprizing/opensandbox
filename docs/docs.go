@@ -194,7 +194,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Returns full Docker inspect data for the sandbox.",
+                "description": "Returns detailed info about the sandbox including ports, resources, and expiration.",
                 "produces": [
                     "application/json"
                 ],
@@ -213,10 +213,9 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Docker inspect response",
+                        "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/models.SandboxDetail"
                         }
                     },
                     "404": {
@@ -690,7 +689,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Restart a sandbox (stop + start).",
+                "description": "Restart a sandbox (stop + start). Returns the new port mappings and a fresh expiration timer.",
                 "produces": [
                     "application/json"
                 ],
@@ -709,12 +708,9 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "status: restarted",
+                        "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/models.RestartResponse"
                         }
                     },
                     "404": {
@@ -1016,6 +1012,61 @@ const docTemplate = `{
                 "memory": {
                     "description": "memory limit in MB (e.g. 512 = 512MB). Default: 1024 (1GB), Max: 8192 (8GB)",
                     "type": "integer"
+                }
+            }
+        },
+        "models.RestartResponse": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "type": "string"
+                },
+                "ports": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.SandboxDetail": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "ports": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "resources": {
+                    "$ref": "#/definitions/models.ResourceLimits"
+                },
+                "running": {
+                    "type": "boolean"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
                 }
             }
         }

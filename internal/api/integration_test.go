@@ -15,12 +15,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func init() { gin.SetMode(gin.TestMode) }
-
 // realRouter builds a Gin engine wired to the real Docker daemon.
 func realRouter() *gin.Engine {
 	r := gin.New()
-	api.New(docker.New()).RegisterRoutes(r.Group("/v1"))
+	h := api.New(docker.New())
+	h.RegisterHealthCheck(r)
+	h.RegisterRoutes(r.Group("/v1"))
 	return r
 }
 
@@ -50,9 +50,15 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), id[:12])
 
-	// 3. Inspect the sandbox.
+	// 3. Inspect the sandbox — should return curated fields.
 	w = do(r, "GET", "/v1/sandboxes/"+id, nil)
 	assert.Equal(t, http.StatusOK, w.Code)
+
+	var detail models.SandboxDetail
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &detail))
+	assert.Equal(t, id, detail.ID)
+	assert.True(t, detail.Running)
+	assert.NotNil(t, detail.ExpiresAt, "sandbox should have an expiration time")
 
 	// 4. Exec a command inside the sandbox.
 	w = do(r, "POST", "/v1/sandboxes/"+id+"/exec", map[string]any{
@@ -99,10 +105,15 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "renewed")
 
-	// 12. Restart the sandbox.
+	// 12. Restart the sandbox — should return new ports and expiration.
 	w = do(r, "POST", "/v1/sandboxes/"+id+"/restart", nil)
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "restarted")
+
+	var restarted models.RestartResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &restarted))
+	assert.Equal(t, "restarted", restarted.Status)
+	assert.NotNil(t, restarted.Ports, "restart should return port mappings")
+	assert.NotNil(t, restarted.ExpiresAt, "restart should return expiration time")
 
 	// 13. Stop the sandbox.
 	w = do(r, "POST", "/v1/sandboxes/"+id+"/stop", nil)
@@ -145,7 +156,7 @@ func TestIntegration_NotFound(t *testing.T) {
 func TestIntegration_DefaultResourceLimits(t *testing.T) {
 	r := realRouter()
 
-	// Create a sandbox without specifying resource limits (assumes nextjs-docker:latest is already available locally)
+	// Create a sandbox without specifying resource limits
 	w := do(r, "POST", "/v1/sandboxes", map[string]any{
 		"image":   "nextjs-docker:latest",
 		"cmd":     []string{"sleep", "60"},
@@ -162,21 +173,16 @@ func TestIntegration_DefaultResourceLimits(t *testing.T) {
 		do(r, "DELETE", "/v1/sandboxes/"+id, nil)
 	}()
 
-	// Inspect the sandbox to verify default resource limits
+	// Inspect the sandbox to verify default resource limits.
 	w = do(r, "GET", "/v1/sandboxes/"+id, nil)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var inspect map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &inspect))
+	var detail models.SandboxDetail
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &detail))
 
-	// Verify HostConfig.Memory = 1GB (1024 * 1024 * 1024 bytes)
-	hostConfig := inspect["HostConfig"].(map[string]any)
-	memory := int64(hostConfig["Memory"].(float64))
-	assert.Equal(t, int64(1024*1024*1024), memory, "Default memory should be 1GB")
-
-	// Verify HostConfig.NanoCpus = 1 CPU (1e9 nanocpus)
-	nanoCPUs := int64(hostConfig["NanoCpus"].(float64))
-	assert.Equal(t, int64(1e9), nanoCPUs, "Default CPUs should be 1 vCPU")
+	// Verify defaults: 1GB RAM, 1 vCPU
+	assert.Equal(t, int64(1024), detail.Resources.Memory, "Default memory should be 1024 MB")
+	assert.Equal(t, 1.0, detail.Resources.CPUs, "Default CPUs should be 1.0")
 }
 
 func TestIntegration_ImagePull(t *testing.T) {
