@@ -57,9 +57,13 @@ definitions:
     required:
     - cmd
     type: object
-  models.ExecResponse:
+  models.ExecResult:
     properties:
-      output:
+      exit_code:
+        type: integer
+      stderr:
+        type: string
+      stdout:
         type: string
     type: object
   models.FileListResponse:
@@ -454,8 +458,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Run an arbitrary command inside the sandbox and return combined
-        stdout+stderr.
+      description: Run an arbitrary command inside the sandbox and return separated
+        stdout, stderr, and exit code.
       parameters:
       - description: Sandbox ID
         in: path
@@ -474,7 +478,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/models.ExecResponse'
+            $ref: '#/definitions/models.ExecResult'
         "400":
           description: Bad Request
           schema:

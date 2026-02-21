@@ -392,7 +392,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Run an arbitrary command inside the sandbox and return combined stdout+stderr.",
+                "description": "Run an arbitrary command inside the sandbox and return separated stdout, stderr, and exit code.",
                 "consumes": [
                     "application/json"
                 ],
@@ -425,7 +425,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/models.ExecResponse"
+                            "$ref": "#/definitions/models.ExecResult"
                         }
                     },
                     "400": {
@@ -1195,10 +1195,16 @@ const docTemplate = `{
                 }
             }
         },
-        "models.ExecResponse": {
+        "models.ExecResult": {
             "type": "object",
             "properties": {
-                "output": {
+                "exit_code": {
+                    "type": "integer"
+                },
+                "stderr": {
+                    "type": "string"
+                },
+                "stdout": {
                     "type": "string"
                 }
             }

@@ -34,7 +34,7 @@ type stub struct {
 	pause           func(string) error
 	resume          func(string) error
 	renewExpiration func(string, int) error
-	exec            func(string, []string) (string, error)
+	exec            func(string, []string) (models.ExecResult, error)
 	logs            func(string, models.LogsOptions) (io.ReadCloser, error)
 	stats           func(string) (models.SandboxStats, error)
 	readFile        func(string, string) (string, error)
@@ -78,8 +78,11 @@ func (s *stub) Resume(_ context.Context, id string) error { return s.resume(id) 
 func (s *stub) RenewExpiration(_ context.Context, id string, timeout int) error {
 	return s.renewExpiration(id, timeout)
 }
-func (s *stub) Exec(_ context.Context, id string, cmd []string) (string, error) {
-	return s.exec(id, cmd)
+func (s *stub) Exec(_ context.Context, id string, cmd []string) (models.ExecResult, error) {
+	if s.exec != nil {
+		return s.exec(id, cmd)
+	}
+	return models.ExecResult{}, nil
 }
 func (s *stub) Logs(_ context.Context, id string, opts models.LogsOptions) (io.ReadCloser, error) {
 	if s.logs != nil {
@@ -303,14 +306,52 @@ func TestRestartSandbox_NotFound(t *testing.T) {
 
 func TestExecSandbox(t *testing.T) {
 	r := newRouter(&stub{
-		exec: func(id string, cmd []string) (string, error) {
-			return "src\npackage.json\n", nil
+		exec: func(id string, cmd []string) (models.ExecResult, error) {
+			return models.ExecResult{
+				Stdout:   "src\npackage.json\n",
+				Stderr:   "",
+				ExitCode: 0,
+			}, nil
 		},
 	})
 
 	w := do(r, "POST", "/v1/sandboxes/abc123/exec", map[string]any{"cmd": []string{"ls", "/app"}})
 	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Body.String(), "src")
+	body := w.Body.String()
+	assert.Contains(t, body, "src")
+	assert.Contains(t, body, `"stdout"`)
+	assert.Contains(t, body, `"stderr"`)
+	assert.Contains(t, body, `"exit_code"`)
+}
+
+func TestExecSandbox_WithStderr(t *testing.T) {
+	r := newRouter(&stub{
+		exec: func(id string, cmd []string) (models.ExecResult, error) {
+			return models.ExecResult{
+				Stdout:   "",
+				Stderr:   "command not found\n",
+				ExitCode: 127,
+			}, nil
+		},
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/exec", map[string]any{"cmd": []string{"nonexistent"}})
+	assert.Equal(t, 200, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, "command not found")
+	assert.Contains(t, body, "127")
+}
+
+func TestExecSandbox_NotRunning(t *testing.T) {
+	r := newRouter(&stub{
+		exec: func(id string, cmd []string) (models.ExecResult, error) {
+			return models.ExecResult{}, docker.ErrNotRunning
+		},
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/exec", map[string]any{"cmd": []string{"echo", "hi"}})
+	assert.Equal(t, 409, w.Code)
+	assert.Contains(t, w.Body.String(), "CONFLICT")
 }
 
 func TestExecSandbox_MissingCmd(t *testing.T) {
@@ -979,4 +1020,63 @@ func TestGetImage_NotFound(t *testing.T) {
 	w := do(r, "GET", "/v1/images/nope", nil)
 	assert.Equal(t, 404, w.Code)
 	assert.Contains(t, w.Body.String(), "NOT_FOUND")
+}
+
+// ── Conflict (409) Tests ────────────────────────────────────────────────────
+
+func TestStartSandbox_AlreadyRunning(t *testing.T) {
+	r := newRouter(&stub{
+		start: func(string) (models.RestartResponse, error) {
+			return models.RestartResponse{}, docker.ErrAlreadyRunning
+		},
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/start", nil)
+	assert.Equal(t, 409, w.Code)
+	assert.Contains(t, w.Body.String(), "CONFLICT")
+	assert.Contains(t, w.Body.String(), "already running")
+}
+
+func TestStopSandbox_AlreadyStopped(t *testing.T) {
+	r := newRouter(&stub{
+		stop: func(string) error { return docker.ErrAlreadyStopped },
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/stop", nil)
+	assert.Equal(t, 409, w.Code)
+	assert.Contains(t, w.Body.String(), "CONFLICT")
+	assert.Contains(t, w.Body.String(), "already stopped")
+}
+
+func TestPauseSandbox_AlreadyPaused(t *testing.T) {
+	r := newRouter(&stub{
+		pause: func(string) error { return docker.ErrAlreadyPaused },
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/pause", nil)
+	assert.Equal(t, 409, w.Code)
+	assert.Contains(t, w.Body.String(), "CONFLICT")
+	assert.Contains(t, w.Body.String(), "already paused")
+}
+
+func TestPauseSandbox_NotRunning(t *testing.T) {
+	r := newRouter(&stub{
+		pause: func(string) error { return docker.ErrNotRunning },
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/pause", nil)
+	assert.Equal(t, 409, w.Code)
+	assert.Contains(t, w.Body.String(), "CONFLICT")
+	assert.Contains(t, w.Body.String(), "not running")
+}
+
+func TestResumeSandbox_NotPaused(t *testing.T) {
+	r := newRouter(&stub{
+		resume: func(string) error { return docker.ErrNotPaused },
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/resume", nil)
+	assert.Equal(t, 409, w.Code)
+	assert.Contains(t, w.Body.String(), "CONFLICT")
+	assert.Contains(t, w.Body.String(), "not paused")
 }

@@ -62,9 +62,12 @@ type ExecRequest struct {
 	Cmd []string `json:"cmd" binding:"required"`
 }
 
-// ExecResponse is the response for POST /v1/sandboxes/:id/exec
-type ExecResponse struct {
-	Output string `json:"output"`
+// ExecResult holds the separated output from a command execution inside a sandbox.
+// Used internally by the Docker client and returned directly by the API.
+type ExecResult struct {
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	ExitCode int    `json:"exit_code"`
 }
 
 // FileReadResponse is the response for GET /v1/sandboxes/:id/files

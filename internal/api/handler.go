@@ -219,13 +219,13 @@ func (h *Handler) deleteSandbox(c *gin.Context) {
 
 // execSandbox handles POST /v1/sandboxes/:id/exec.
 // @Summary      Execute a command
-// @Description  Run an arbitrary command inside the sandbox and return combined stdout+stderr.
+// @Description  Run an arbitrary command inside the sandbox and return separated stdout, stderr, and exit code.
 // @Tags         sandboxes
 // @Accept       json
 // @Produce      json
 // @Param        id    path      string             true  "Sandbox ID"
 // @Param        body  body      models.ExecRequest  true  "Command to execute"
-// @Success      200   {object}  models.ExecResponse
+// @Success      200   {object}  models.ExecResult
 // @Failure      400   {object}  ErrorResponse
 // @Failure      404   {object}  ErrorResponse
 // @Failure      500   {object}  ErrorResponse
@@ -238,13 +238,13 @@ func (h *Handler) execSandbox(c *gin.Context) {
 		return
 	}
 
-	output, err := h.docker.Exec(c.Request.Context(), c.Param("id"), req.Cmd)
+	result, err := h.docker.Exec(c.Request.Context(), c.Param("id"), req.Cmd)
 	if err != nil {
 		internalError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, models.ExecResponse{Output: output})
+	c.JSON(http.StatusOK, result)
 }
 
 // getStats handles GET /v1/sandboxes/:id/stats.

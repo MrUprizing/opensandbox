@@ -268,7 +268,17 @@ func (c *Client) Inspect(ctx context.Context, id string) (models.SandboxDetail, 
 }
 
 // Start starts a stopped sandbox and re-schedules the auto-stop timer.
+// Returns ErrAlreadyRunning (409) if the sandbox is already running.
 func (c *Client) Start(ctx context.Context, id string) (models.RestartResponse, error) {
+	// Check current state to return a meaningful conflict error.
+	pre, err := c.cli.ContainerInspect(ctx, id, moby.ContainerInspectOptions{})
+	if err != nil {
+		return models.RestartResponse{}, wrapNotFound(err)
+	}
+	if pre.Container.State.Running {
+		return models.RestartResponse{}, ErrAlreadyRunning
+	}
+
 	if _, err := c.cli.ContainerStart(ctx, id, moby.ContainerStartOptions{}); err != nil {
 		return models.RestartResponse{}, wrapNotFound(err)
 	}
@@ -300,9 +310,18 @@ func (c *Client) Start(ctx context.Context, id string) (models.RestartResponse, 
 }
 
 // Stop stops a running sandbox and cancels its expiration timer.
+// Returns ErrAlreadyStopped (409) if the sandbox is not running.
 func (c *Client) Stop(ctx context.Context, id string) error {
+	info, err := c.cli.ContainerInspect(ctx, id, moby.ContainerInspectOptions{})
+	if err != nil {
+		return wrapNotFound(err)
+	}
+	if !info.Container.State.Running {
+		return ErrAlreadyStopped
+	}
+
 	c.cancelTimer(id)
-	_, err := c.cli.ContainerStop(ctx, id, moby.ContainerStopOptions{})
+	_, err = c.cli.ContainerStop(ctx, id, moby.ContainerStopOptions{})
 	return wrapNotFound(err)
 }
 
@@ -360,14 +379,36 @@ func (c *Client) Remove(ctx context.Context, id string) error {
 }
 
 // Pause pauses a running sandbox (freezes all processes).
+// Returns ErrNotRunning (409) if the sandbox is not running,
+// or ErrAlreadyPaused (409) if it is already paused.
 func (c *Client) Pause(ctx context.Context, id string) error {
-	_, err := c.cli.ContainerPause(ctx, id, moby.ContainerPauseOptions{})
+	info, err := c.cli.ContainerInspect(ctx, id, moby.ContainerInspectOptions{})
+	if err != nil {
+		return wrapNotFound(err)
+	}
+	if info.Container.State.Paused {
+		return ErrAlreadyPaused
+	}
+	if !info.Container.State.Running {
+		return ErrNotRunning
+	}
+
+	_, err = c.cli.ContainerPause(ctx, id, moby.ContainerPauseOptions{})
 	return wrapNotFound(err)
 }
 
 // Resume unpauses a paused sandbox.
+// Returns ErrNotPaused (409) if the sandbox is not currently paused.
 func (c *Client) Resume(ctx context.Context, id string) error {
-	_, err := c.cli.ContainerUnpause(ctx, id, moby.ContainerUnpauseOptions{})
+	info, err := c.cli.ContainerInspect(ctx, id, moby.ContainerInspectOptions{})
+	if err != nil {
+		return wrapNotFound(err)
+	}
+	if !info.Container.State.Paused {
+		return ErrNotPaused
+	}
+
+	_, err = c.cli.ContainerUnpause(ctx, id, moby.ContainerUnpauseOptions{})
 	return wrapNotFound(err)
 }
 
@@ -446,14 +487,27 @@ func (c *Client) Stats(ctx context.Context, id string) (models.SandboxStats, err
 	}, nil
 }
 
-// Exec runs a command inside a sandbox and returns combined stdout+stderr.
-func (c *Client) Exec(ctx context.Context, id string, cmd []string) (string, error) {
+// Exec runs a command inside a sandbox and returns separated stdout, stderr, and exit code.
+// Returns ErrNotRunning (409) if the sandbox is not in a running state.
+func (c *Client) Exec(ctx context.Context, id string, cmd []string) (models.ExecResult, error) {
+	info, err := c.cli.ContainerInspect(ctx, id, moby.ContainerInspectOptions{})
+	if err != nil {
+		return models.ExecResult{}, wrapNotFound(err)
+	}
+	if !info.Container.State.Running {
+		return models.ExecResult{}, ErrNotRunning
+	}
+
 	return c.execWithStdin(ctx, id, cmd, nil)
 }
 
 // ReadFile reads the content of a file inside a sandbox.
 func (c *Client) ReadFile(ctx context.Context, id, path string) (string, error) {
-	return c.Exec(ctx, id, []string{"cat", path})
+	result, err := c.Exec(ctx, id, []string{"cat", path})
+	if err != nil {
+		return "", err
+	}
+	return result.Stdout, nil
 }
 
 // WriteFile writes content to a file inside a sandbox (creates parent dirs as needed).
@@ -467,13 +521,19 @@ func (c *Client) WriteFile(ctx context.Context, id, path, content string) error 
 
 // DeleteFile deletes a file or directory inside a sandbox.
 func (c *Client) DeleteFile(ctx context.Context, id, path string) error {
-	_, err := c.Exec(ctx, id, []string{"rm", "-rf", path})
-	return err
+	if _, err := c.Exec(ctx, id, []string{"rm", "-rf", path}); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ListDir lists the contents of a directory inside a sandbox.
 func (c *Client) ListDir(ctx context.Context, id, path string) (string, error) {
-	return c.Exec(ctx, id, []string{"ls", "-la", path})
+	result, err := c.Exec(ctx, id, []string{"ls", "-la", path})
+	if err != nil {
+		return "", err
+	}
+	return result.Stdout, nil
 }
 
 // PullImage pulls a Docker image from a registry and waits for completion.
@@ -578,38 +638,48 @@ func (c *Client) Shutdown(ctx context.Context) {
 	})
 }
 
-// execWithStdin runs a command with optional stdin.
-func (c *Client) execWithStdin(ctx context.Context, id string, cmd []string, stdin io.Reader) (string, error) {
+// execWithStdin runs a command with optional stdin, returning separated stdout/stderr and exit code.
+func (c *Client) execWithStdin(ctx context.Context, id string, cmd []string, stdin io.Reader) (models.ExecResult, error) {
 	attachStdin := stdin != nil
-	execResult, err := c.cli.ExecCreate(ctx, id, moby.ExecCreateOptions{
+	execCfg, err := c.cli.ExecCreate(ctx, id, moby.ExecCreateOptions{
 		AttachStdin:  attachStdin,
 		AttachStdout: true,
 		AttachStderr: true,
 		Cmd:          cmd,
 	})
 	if err != nil {
-		return "", wrapNotFound(err)
+		return models.ExecResult{}, wrapNotFound(err)
 	}
 
-	attached, err := c.cli.ExecAttach(ctx, execResult.ID, moby.ExecAttachOptions{})
+	attached, err := c.cli.ExecAttach(ctx, execCfg.ID, moby.ExecAttachOptions{})
 	if err != nil {
-		return "", err
+		return models.ExecResult{}, err
 	}
 	defer attached.Close()
 
 	if stdin != nil {
 		if _, err := io.Copy(attached.Conn, stdin); err != nil {
-			return "", err
+			return models.ExecResult{}, err
 		}
 		attached.CloseWrite()
 	}
 
 	var stdout, stderr bytes.Buffer
 	if _, err := stdcopy.StdCopy(&stdout, &stderr, attached.Reader); err != nil && err != io.EOF {
-		return "", err
+		return models.ExecResult{}, err
 	}
 
-	return stdout.String() + stderr.String(), nil
+	// Inspect the exec instance to retrieve the exit code.
+	inspect, err := c.cli.ExecInspect(ctx, execCfg.ID, moby.ExecInspectOptions{})
+	if err != nil {
+		return models.ExecResult{}, err
+	}
+
+	return models.ExecResult{
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		ExitCode: inspect.ExitCode,
+	}, nil
 }
 
 // scheduleStop creates a timer that auto-stops the sandbox after the given seconds.

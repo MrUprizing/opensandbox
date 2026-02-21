@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -24,9 +25,24 @@ func notFound(c *gin.Context, resource string) {
 	c.JSON(http.StatusNotFound, ErrorResponse{Code: "NOT_FOUND", Message: resource + " not found"})
 }
 
+// conflict writes a 409 response with code CONFLICT for state-related errors
+// (e.g. starting an already-running sandbox or stopping an already-stopped one).
+func conflict(c *gin.Context, msg string) {
+	c.JSON(http.StatusConflict, ErrorResponse{Code: "CONFLICT", Message: msg})
+}
+
+// requestTimeout writes a 408 response with code TIMEOUT for operations that exceeded their deadline.
+func requestTimeout(c *gin.Context, msg string) {
+	c.JSON(http.StatusRequestTimeout, ErrorResponse{Code: "TIMEOUT", Message: msg})
+}
+
+// rateLimited writes a 429 response with code RATE_LIMITED when the caller exceeds request limits.
+func rateLimited(c *gin.Context, msg string) {
+	c.JSON(http.StatusTooManyRequests, ErrorResponse{Code: "RATE_LIMITED", Message: msg})
+}
+
 // internalError writes a 500 response with code INTERNAL_ERROR.
-// If err is docker.ErrNotFound it downgrades to a 404 notFound response instead.
-// If err is docker.ErrImageNotFound it downgrades to a 400 badRequest response.
+// It first checks for well-known sentinel errors and downgrades to the appropriate status code.
 func internalError(c *gin.Context, err error) {
 	if errors.Is(err, docker.ErrNotFound) {
 		notFound(c, "sandbox")
@@ -34,6 +50,30 @@ func internalError(c *gin.Context, err error) {
 	}
 	if errors.Is(err, docker.ErrImageNotFound) {
 		badRequest(c, "image not found locally, use POST /v1/images/pull to download it first")
+		return
+	}
+	if errors.Is(err, docker.ErrAlreadyRunning) {
+		conflict(c, err.Error())
+		return
+	}
+	if errors.Is(err, docker.ErrAlreadyStopped) {
+		conflict(c, err.Error())
+		return
+	}
+	if errors.Is(err, docker.ErrAlreadyPaused) {
+		conflict(c, err.Error())
+		return
+	}
+	if errors.Is(err, docker.ErrNotPaused) {
+		conflict(c, err.Error())
+		return
+	}
+	if errors.Is(err, docker.ErrNotRunning) {
+		conflict(c, err.Error())
+		return
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		requestTimeout(c, "operation timed out")
 		return
 	}
 	c.JSON(http.StatusInternalServerError, ErrorResponse{Code: "INTERNAL_ERROR", Message: err.Error()})
