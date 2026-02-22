@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"net/netip"
 	"sort"
 	"strings"
 	"sync"
@@ -215,7 +216,9 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 		ExposedPorts: buildExposedPorts(ports),
 	}
 
-	hostCfg := &container.HostConfig{PublishAllPorts: true}
+	hostCfg := &container.HostConfig{
+		PortBindings: buildPortBindings(ports),
+	}
 
 	// Apply resource limits (defaults: 1GB RAM, 1 vCPU)
 	memory := int64(defaultMemoryMB)
@@ -1098,6 +1101,26 @@ func buildExposedPorts(ports []string) network.PortSet {
 		return nil
 	}
 	return ps
+}
+
+// buildPortBindings creates port bindings that only listen on 127.0.0.1 (loopback).
+// This ensures container ports are only reachable through the reverse proxy, not directly.
+func buildPortBindings(ports []string) network.PortMap {
+	if len(ports) == 0 {
+		return nil
+	}
+	pm := make(network.PortMap)
+	for _, p := range ports {
+		parsed, err := network.ParsePort(p)
+		if err != nil {
+			continue
+		}
+		pm[parsed] = []network.PortBinding{{HostIP: netip.MustParseAddr("127.0.0.1")}}
+	}
+	if len(pm) == 0 {
+		return nil
+	}
+	return pm
 }
 
 // extractPorts converts network.PortMap to map["80/tcp"]"32768".
