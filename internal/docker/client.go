@@ -14,13 +14,14 @@ import (
 	"sync"
 	"time"
 
+	"open-sandbox/internal/database"
+	"open-sandbox/models"
+
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
 	moby "github.com/moby/moby/client"
-	"open-sandbox/internal/database"
-	"open-sandbox/models"
 )
 
 // Client wraps the Docker SDK and exposes sandbox operations.
@@ -35,6 +36,7 @@ type Client struct {
 type runningCommand struct {
 	execID    string             // Docker exec instance ID
 	sandboxID string             // parent sandbox container ID
+	cmd       []string           // original command (for pkill pattern)
 	cancel    context.CancelFunc // cancels the exec context
 	stdout    *ringBuffer        // captures stdout
 	stderr    *ringBuffer        // captures stderr
@@ -563,6 +565,7 @@ func (c *Client) ExecCommand(ctx context.Context, sandboxID string, req models.E
 	rc := &runningCommand{
 		execID:    execCfg.ID,
 		sandboxID: sandboxID,
+		cmd:       fullCmd,
 		cancel:    cancel,
 		stdout:    stdoutBuf,
 		stderr:    stderrBuf,
@@ -685,21 +688,14 @@ func (c *Client) KillCommand(ctx context.Context, sandboxID, cmdID string, signa
 		rc.mu.Unlock()
 		return models.CommandDetail{}, ErrCommandNotFound
 	}
-	execID := rc.execID
+	cmd := rc.cmd
 	rc.mu.Unlock()
 
-	// Get the PID via ExecInspect.
-	inspect, err := c.cli.ExecInspect(ctx, execID, moby.ExecInspectOptions{})
-	if err != nil {
-		return models.CommandDetail{}, fmt.Errorf("exec inspect: %w", err)
-	}
-
-	// Run kill -<signal> <pid> inside the container.
-	killCmd := fmt.Sprintf("kill -%d %d", signal, inspect.PID)
-	_, err = c.execWithStdin(ctx, sandboxID, []string{"sh", "-c", killCmd}, nil)
-	if err != nil {
-		return models.CommandDetail{}, fmt.Errorf("kill command: %w", err)
-	}
+	// Kill the process inside the container using pkill with the original command pattern.
+	pattern := strings.Join(cmd, " ")
+	killCmd := fmt.Sprintf("pkill -%d -f %q", signal, pattern)
+	// Ignore error: pkill returns 1 if process already exited (race condition).
+	c.execWithStdin(ctx, sandboxID, []string{"sh", "-c", killCmd}, nil)
 
 	// Wait briefly for the command to finish, then return current state.
 	select {
