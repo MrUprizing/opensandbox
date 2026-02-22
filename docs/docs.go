@@ -1366,7 +1366,7 @@ const docTemplate = `{
                 },
                 "image": {
                     "type": "string",
-                    "example": "node:22"
+                    "example": "node:24"
                 },
                 "ports": {
                     "description": "container ports to expose, e.g. [\"3000\", \"8080/tcp\"]. First port is the default for proxy routing.",
@@ -1405,14 +1405,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "ports": {
-                    "description": "\"80/tcp\": \"32768\"",
-                    "type": "object",
-                    "additionalProperties": {
+                    "description": "exposed container ports, e.g. [\"3000/tcp\", \"8080/tcp\"]",
+                    "type": "array",
+                    "items": {
                         "type": "string"
                     }
                 },
                 "url": {
-                    "description": "proxy URL, e.g. \"http://eager-turing.localhost:3000\"",
+                    "description": "proxy URL, e.g. \"http://eager-turing.localhost\"",
                     "type": "string"
                 }
             }
@@ -1616,8 +1616,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "ports": {
-                    "type": "object",
-                    "additionalProperties": {
+                    "type": "array",
+                    "items": {
                         "type": "string"
                     }
                 },
@@ -1645,8 +1645,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "ports": {
-                    "type": "object",
-                    "additionalProperties": {
+                    "type": "array",
+                    "items": {
                         "type": "string"
                     }
                 },

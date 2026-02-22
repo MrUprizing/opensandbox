@@ -19,44 +19,44 @@ type CreateSandboxRequest struct {
 
 // CreateSandboxResponse is the response for POST /v1/sandboxes
 type CreateSandboxResponse struct {
-	ID    string            `json:"id"`
-	Name  string            `json:"name"`          // auto-generated name (e.g. "eager-turing")
-	Ports map[string]string `json:"ports"`         // "80/tcp": "32768"
-	URL   string            `json:"url,omitempty"` // proxy URL, e.g. "http://eager-turing.localhost:3000"
+	ID    string   `json:"id"`
+	Name  string   `json:"name"`          // auto-generated name (e.g. "eager-turing")
+	Ports []string `json:"ports"`         // exposed container ports, e.g. ["3000/tcp", "8080/tcp"]
+	URL   string   `json:"url,omitempty"` // proxy URL, e.g. "http://eager-turing.localhost"
 }
 
 // SandboxSummary is a concise view of a sandbox for list endpoints.
 type SandboxSummary struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name"`
-	Image     string            `json:"image"`
-	Status    string            `json:"status"`
-	State     string            `json:"state"`
-	Ports     map[string]string `json:"ports"`
-	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
-	URL       string            `json:"url,omitempty"`
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Image     string     `json:"image"`
+	Status    string     `json:"status"`
+	State     string     `json:"state"`
+	Ports     []string   `json:"ports"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	URL       string     `json:"url,omitempty"`
 }
 
 // SandboxDetail is the full inspect response with only relevant fields.
 type SandboxDetail struct {
-	ID         string            `json:"id"`
-	Name       string            `json:"name"`
-	Image      string            `json:"image"`
-	Status     string            `json:"status"`
-	Running    bool              `json:"running"`
-	Ports      map[string]string `json:"ports"`
-	Resources  ResourceLimits    `json:"resources"`
-	StartedAt  string            `json:"started_at"`
-	FinishedAt string            `json:"finished_at"`
-	ExpiresAt  *time.Time        `json:"expires_at,omitempty"`
-	URL        string            `json:"url,omitempty"`
+	ID         string         `json:"id"`
+	Name       string         `json:"name"`
+	Image      string         `json:"image"`
+	Status     string         `json:"status"`
+	Running    bool           `json:"running"`
+	Ports      []string       `json:"ports"`
+	Resources  ResourceLimits `json:"resources"`
+	StartedAt  string         `json:"started_at"`
+	FinishedAt string         `json:"finished_at"`
+	ExpiresAt  *time.Time     `json:"expires_at,omitempty"`
+	URL        string         `json:"url,omitempty"`
 }
 
 // RestartResponse is the response for POST /v1/sandboxes/:id/restart
 type RestartResponse struct {
-	Status    string            `json:"status"`
-	Ports     map[string]string `json:"ports"`
-	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
+	Status    string     `json:"status"`
+	Ports     []string   `json:"ports"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 // ExecCommandRequest is the body for POST /v1/sandboxes/:id/cmd

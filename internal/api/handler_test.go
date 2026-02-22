@@ -230,7 +230,7 @@ func TestCreateSandbox(t *testing.T) {
 			return models.CreateSandboxResponse{
 				ID:    "abc123",
 				Name:  "eager-turing",
-				Ports: map[string]string{"3000/tcp": "32768"},
+				Ports: []string{"3000/tcp"},
 			}, nil
 		},
 	})
@@ -272,7 +272,7 @@ func TestGetSandbox_ReturnsDetail(t *testing.T) {
 				Image:   "nginx:latest",
 				Status:  "running",
 				Running: true,
-				Ports:   map[string]string{"80/tcp": "32770"},
+				Ports:   []string{"80/tcp"},
 				Resources: models.ResourceLimits{
 					Memory: 1024,
 					CPUs:   1.0,
@@ -286,8 +286,9 @@ func TestGetSandbox_ReturnsDetail(t *testing.T) {
 	assert.Equal(t, 200, w.Code)
 	body := w.Body.String()
 	assert.Contains(t, body, "my-sandbox")
-	assert.Contains(t, body, "32770")
+	assert.Contains(t, body, "80/tcp")
 	assert.Contains(t, body, "running")
+	assert.NotContains(t, body, "32770") // host ports should not be exposed
 	// Should NOT contain raw Docker inspect noise
 	assert.NotContains(t, body, "HostConfig")
 	assert.NotContains(t, body, "GraphDriver")
@@ -317,7 +318,7 @@ func TestRestartSandbox(t *testing.T) {
 		restart: func(string) (models.RestartResponse, error) {
 			return models.RestartResponse{
 				Status: "restarted",
-				Ports:  map[string]string{"3000/tcp": "32775"},
+				Ports:  []string{"3000/tcp"},
 			}, nil
 		},
 	})
@@ -326,8 +327,7 @@ func TestRestartSandbox(t *testing.T) {
 	assert.Equal(t, 200, w.Code)
 	body := w.Body.String()
 	assert.Contains(t, body, "restarted")
-	assert.Contains(t, body, "32775")
-	assert.Contains(t, body, "ports")
+	assert.Contains(t, body, "3000/tcp")
 }
 
 func TestRestartSandbox_NotFound(t *testing.T) {
@@ -591,7 +591,7 @@ func TestCreateSandbox_WithResourcesAndTimeout(t *testing.T) {
 	r := newRouter(&stub{
 		create: func(req models.CreateSandboxRequest) (models.CreateSandboxResponse, error) {
 			captured = req
-			return models.CreateSandboxResponse{ID: "abc123", Ports: map[string]string{"3000/tcp": "32768"}}, nil
+			return models.CreateSandboxResponse{ID: "abc123", Ports: []string{"3000/tcp"}}, nil
 		},
 	})
 
@@ -975,7 +975,7 @@ func TestStartSandbox(t *testing.T) {
 		start: func(id string) (models.RestartResponse, error) {
 			return models.RestartResponse{
 				Status: "started",
-				Ports:  map[string]string{"3000/tcp": "32780"},
+				Ports:  []string{"3000/tcp"},
 			}, nil
 		},
 	})
@@ -984,7 +984,7 @@ func TestStartSandbox(t *testing.T) {
 	assert.Equal(t, 200, w.Code)
 	body := w.Body.String()
 	assert.Contains(t, body, "started")
-	assert.Contains(t, body, "32780")
+	assert.Contains(t, body, "3000/tcp")
 }
 
 func TestStartSandbox_NotFound(t *testing.T) {

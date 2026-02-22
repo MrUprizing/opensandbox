@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -159,7 +160,7 @@ func (c *Client) List(ctx context.Context) ([]models.SandboxSummary, error) {
 			ID:    db.ID,
 			Name:  db.Name,
 			Image: db.Image,
-			Ports: map[string]string(db.Ports),
+			Ports: portKeys(map[string]string(db.Ports)),
 		}
 
 		// Enrich with live Docker state if the container still exists.
@@ -169,7 +170,7 @@ func (c *Client) List(ctx context.Context) ([]models.SandboxSummary, error) {
 			s.Status = info.Status
 			s.State = info.State
 			if len(info.Ports) > 0 {
-				s.Ports = info.Ports
+				s.Ports = portKeys(info.Ports)
 			}
 		} else {
 			s.Status = "removed"
@@ -280,7 +281,7 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 	return models.CreateSandboxResponse{
 		ID:    result.ID,
 		Name:  name,
-		Ports: assignedPorts,
+		Ports: portKeys(assignedPorts),
 	}, nil
 }
 
@@ -298,7 +299,7 @@ func (c *Client) Inspect(ctx context.Context, id string) (models.SandboxDetail, 
 		Image:   info.Config.Image,
 		Status:  string(info.State.Status),
 		Running: info.State.Running,
-		Ports:   extractPorts(info.NetworkSettings.Ports),
+		Ports:   portKeys(extractPorts(info.NetworkSettings.Ports)),
 		Resources: models.ResourceLimits{
 			Memory: info.HostConfig.Memory / (1024 * 1024), // bytes to MB
 			CPUs:   float64(info.HostConfig.NanoCPUs) / 1e9,
@@ -353,7 +354,7 @@ func (c *Client) Start(ctx context.Context, id string) (models.RestartResponse, 
 
 	return models.RestartResponse{
 		Status:    "started",
-		Ports:     ports,
+		Ports:     portKeys(ports),
 		ExpiresAt: expiresAt,
 	}, nil
 }
@@ -409,7 +410,7 @@ func (c *Client) Restart(ctx context.Context, id string) (models.RestartResponse
 
 	return models.RestartResponse{
 		Status:    "restarted",
-		Ports:     ports,
+		Ports:     portKeys(ports),
 		ExpiresAt: expiresAt,
 	}, nil
 }
@@ -1108,6 +1109,16 @@ func extractPorts(pm network.PortMap) map[string]string {
 		}
 	}
 	return out
+}
+
+// portKeys returns the container port keys from a port map (e.g. ["3000/tcp", "8080/tcp"]).
+func portKeys(pm map[string]string) []string {
+	keys := make([]string, 0, len(pm))
+	for k := range pm {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // containerName extracts a clean name from Docker's name list (removes leading /).

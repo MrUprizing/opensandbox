@@ -58,7 +58,7 @@ definitions:
           type: string
         type: array
       image:
-        example: node:22
+        example: node:24
         type: string
       ports:
         description: container ports to expose, e.g. ["3000", "8080/tcp"]. First port
@@ -88,12 +88,12 @@ definitions:
         description: auto-generated name (e.g. "eager-turing")
         type: string
       ports:
-        additionalProperties:
+        description: exposed container ports, e.g. ["3000/tcp", "8080/tcp"]
+        items:
           type: string
-        description: '"80/tcp": "32768"'
-        type: object
+        type: array
       url:
-        description: proxy URL, e.g. "http://eager-turing.localhost:3000"
+        description: proxy URL, e.g. "http://eager-turing.localhost"
         type: string
     type: object
   models.ExecCommandRequest:
@@ -234,9 +234,9 @@ definitions:
       expires_at:
         type: string
       ports:
-        additionalProperties:
+        items:
           type: string
-        type: object
+        type: array
       status:
         type: string
     type: object
@@ -253,9 +253,9 @@ definitions:
       name:
         type: string
       ports:
-        additionalProperties:
+        items:
           type: string
-        type: object
+        type: array
       resources:
         $ref: '#/definitions/models.ResourceLimits'
       running:
