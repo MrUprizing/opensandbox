@@ -10,6 +10,8 @@ import (
 	"io"
 	"log"
 	"math"
+	"net/netip"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,10 +28,11 @@ import (
 
 // Client wraps the Docker SDK and exposes sandbox operations.
 type Client struct {
-	cli      *moby.Client
-	repo     *database.Repository
-	timers   sync.Map // map[containerID]*timerEntry
-	commands sync.Map // map[cmdID]*runningCommand
+	cli            *moby.Client
+	repo           *database.Repository
+	timers         sync.Map          // map[containerID]*timerEntry
+	commands       sync.Map          // map[cmdID]*runningCommand
+	onCacheInvalid func(name string) // called when a sandbox's ports change or it is removed
 }
 
 // runningCommand tracks a command that is currently executing.
@@ -87,6 +90,23 @@ func New(repo *database.Repository) *Client {
 	return &Client{cli: mobyClient, repo: repo}
 }
 
+// SetCacheInvalidator registers a callback invoked when a sandbox's ports
+// change (restart) or it is stopped/removed, so the proxy cache stays fresh.
+func (c *Client) SetCacheInvalidator(fn func(name string)) {
+	c.onCacheInvalid = fn
+}
+
+// invalidateCache notifies the proxy that a sandbox's route may have changed.
+func (c *Client) invalidateCache(containerID string) {
+	if c.onCacheInvalid == nil {
+		return
+	}
+	sb, err := c.repo.FindByID(containerID)
+	if err == nil && sb != nil && sb.Name != "" {
+		c.onCacheInvalid(sb.Name)
+	}
+}
+
 // Ping checks connectivity with the Docker daemon.
 func (c *Client) Ping(ctx context.Context) error {
 	_, err := c.cli.Ping(ctx, moby.PingOptions{})
@@ -141,7 +161,7 @@ func (c *Client) List(ctx context.Context) ([]models.SandboxSummary, error) {
 			ID:    db.ID,
 			Name:  db.Name,
 			Image: db.Image,
-			Ports: map[string]string(db.Ports),
+			Ports: portKeys(map[string]string(db.Ports)),
 		}
 
 		// Enrich with live Docker state if the container still exists.
@@ -151,7 +171,7 @@ func (c *Client) List(ctx context.Context) ([]models.SandboxSummary, error) {
 			s.Status = info.Status
 			s.State = info.State
 			if len(info.Ports) > 0 {
-				s.Ports = info.Ports
+				s.Ports = portKeys(info.Ports)
 			}
 		} else {
 			s.Status = "removed"
@@ -183,14 +203,22 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 		return models.CreateSandboxResponse{}, ErrImageNotFound
 	}
 
+	ports := normalizePorts(req.Ports)
+	mainPort := ""
+	if len(ports) > 0 {
+		mainPort = ports[0]
+	}
+
 	cfg := &container.Config{
 		Image:        req.Image,
 		Env:          req.Env,
 		Cmd:          []string{"sleep", "infinity"},
-		ExposedPorts: buildExposedPorts(req.Ports),
+		ExposedPorts: buildExposedPorts(ports),
 	}
 
-	hostCfg := &container.HostConfig{PublishAllPorts: true}
+	hostCfg := &container.HostConfig{
+		PortBindings: buildPortBindings(ports),
+	}
 
 	// Apply resource limits (defaults: 1GB RAM, 1 vCPU)
 	memory := int64(defaultMemoryMB)
@@ -208,10 +236,16 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 		NanoCPUs: int64(cpus * 1e9),
 	}
 
+	// Auto-generate a unique sandbox name.
+	name := generateUniqueName(func(n string) bool {
+		sb, _ := c.repo.FindByName(n)
+		return sb != nil
+	})
+
 	result, err := c.cli.ContainerCreate(ctx, moby.ContainerCreateOptions{
 		Config:     cfg,
 		HostConfig: hostCfg,
-		Name:       req.Name,
+		Name:       name,
 	})
 	if err != nil {
 		return models.CreateSandboxResponse{}, err
@@ -234,21 +268,23 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 		return models.CreateSandboxResponse{}, err
 	}
 
-	ports := extractPorts(info.Container.NetworkSettings.Ports)
+	assignedPorts := extractPorts(info.Container.NetworkSettings.Ports)
 
 	// Persist sandbox (fire-and-forget: log errors, don't block).
 	if err := c.repo.Save(database.Sandbox{
 		ID:    result.ID,
-		Name:  req.Name,
+		Name:  name,
 		Image: req.Image,
-		Ports: database.JSONMap(ports),
+		Ports: database.JSONMap(assignedPorts),
+		Port:  mainPort,
 	}); err != nil {
 		log.Printf("database: failed to persist sandbox %s: %v", result.ID, err)
 	}
 
 	return models.CreateSandboxResponse{
 		ID:    result.ID,
-		Ports: ports,
+		Name:  name,
+		Ports: portKeys(assignedPorts),
 	}, nil
 }
 
@@ -266,7 +302,7 @@ func (c *Client) Inspect(ctx context.Context, id string) (models.SandboxDetail, 
 		Image:   info.Config.Image,
 		Status:  string(info.State.Status),
 		Running: info.State.Running,
-		Ports:   extractPorts(info.NetworkSettings.Ports),
+		Ports:   portKeys(extractPorts(info.NetworkSettings.Ports)),
 		Resources: models.ResourceLimits{
 			Memory: info.HostConfig.Memory / (1024 * 1024), // bytes to MB
 			CPUs:   float64(info.HostConfig.NanoCPUs) / 1e9,
@@ -317,10 +353,11 @@ func (c *Client) Start(ctx context.Context, id string) (models.RestartResponse, 
 	if dbErr := c.repo.UpdatePorts(id, database.JSONMap(ports)); dbErr != nil {
 		log.Printf("database: failed to update ports for sandbox %s: %v", id, dbErr)
 	}
+	c.invalidateCache(id)
 
 	return models.RestartResponse{
 		Status:    "started",
-		Ports:     ports,
+		Ports:     portKeys(ports),
 		ExpiresAt: expiresAt,
 	}, nil
 }
@@ -337,6 +374,7 @@ func (c *Client) Stop(ctx context.Context, id string) error {
 	}
 
 	c.cancelTimer(id)
+	c.invalidateCache(id)
 	_, err = c.cli.ContainerStop(ctx, id, moby.ContainerStopOptions{})
 	return wrapNotFound(err)
 }
@@ -371,10 +409,11 @@ func (c *Client) Restart(ctx context.Context, id string) (models.RestartResponse
 	if dbErr := c.repo.UpdatePorts(id, database.JSONMap(ports)); dbErr != nil {
 		log.Printf("database: failed to update ports for sandbox %s: %v", id, dbErr)
 	}
+	c.invalidateCache(id)
 
 	return models.RestartResponse{
 		Status:    "restarted",
-		Ports:     ports,
+		Ports:     portKeys(ports),
 		ExpiresAt: expiresAt,
 	}, nil
 }
@@ -383,6 +422,7 @@ func (c *Client) Restart(ctx context.Context, id string) (models.RestartResponse
 // If the container no longer exists in Docker, it still cleans up the DB record.
 func (c *Client) Remove(ctx context.Context, id string) error {
 	c.cancelTimer(id)
+	c.invalidateCache(id)
 
 	// Kill all running commands for this sandbox.
 	c.commands.Range(func(key, value any) bool {
@@ -1021,20 +1061,66 @@ func wrapNotFound(err error) error {
 	return err
 }
 
-// buildExposedPorts converts ["80/tcp", "443/tcp"] to network.PortSet.
+// normalizePort ensures a port spec has a protocol suffix.
+// "3000" → "3000/tcp", "3000/tcp" → "3000/tcp" (unchanged).
+func normalizePort(port string) string {
+	if port == "" {
+		return ""
+	}
+	if !strings.Contains(port, "/") {
+		return port + "/tcp"
+	}
+	return port
+}
+
+// normalizePorts normalizes a slice of port specs.
+func normalizePorts(ports []string) []string {
+	out := make([]string, 0, len(ports))
+	for _, p := range ports {
+		if n := normalizePort(p); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// buildExposedPorts converts a slice of port specs to network.PortSet.
 func buildExposedPorts(ports []string) network.PortSet {
 	if len(ports) == 0 {
 		return nil
 	}
-	set := make(network.PortSet)
+	ps := make(network.PortSet)
 	for _, p := range ports {
 		parsed, err := network.ParsePort(p)
 		if err != nil {
 			continue
 		}
-		set[parsed] = struct{}{}
+		ps[parsed] = struct{}{}
 	}
-	return set
+	if len(ps) == 0 {
+		return nil
+	}
+	return ps
+}
+
+// buildPortBindings creates port bindings that only listen on 127.0.0.1 (loopback).
+// This ensures container ports are only reachable through the reverse proxy, not directly.
+func buildPortBindings(ports []string) network.PortMap {
+	if len(ports) == 0 {
+		return nil
+	}
+	pm := make(network.PortMap)
+	for _, p := range ports {
+		parsed, err := network.ParsePort(p)
+		if err != nil {
+			continue
+		}
+		pm[parsed] = []network.PortBinding{{HostIP: netip.MustParseAddr("127.0.0.1")}}
+	}
+	if len(pm) == 0 {
+		return nil
+	}
+	return pm
 }
 
 // extractPorts converts network.PortMap to map["80/tcp"]"32768".
@@ -1046,6 +1132,16 @@ func extractPorts(pm network.PortMap) map[string]string {
 		}
 	}
 	return out
+}
+
+// portKeys returns the container port keys from a port map (e.g. ["3000/tcp", "8080/tcp"]).
+func portKeys(pm map[string]string) []string {
+	keys := make([]string, 0, len(pm))
+	for k := range pm {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // containerName extracts a clean name from Docker's name list (removes leading /).

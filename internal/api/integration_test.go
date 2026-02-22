@@ -23,7 +23,7 @@ func realRouter() *gin.Engine {
 	db := database.New(":memory:")
 	repo := database.NewRepository(db)
 	r := gin.New()
-	h := api.New(docker.New(repo))
+	h := api.New(docker.New(repo), "localhost", ":3000")
 	h.RegisterHealthCheck(r)
 	h.RegisterRoutes(r.Group("/v1"))
 	return r
@@ -35,7 +35,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	// 1. Create a sandbox using a lightweight image (assumes nextjs-docker:latest is already available locally).
 	w := do(r, "POST", "/v1/sandboxes", map[string]any{
 		"image":   "nextjs-docker:latest",
-		"timeout": 60,
+		"timeout": 300,
 	})
 	require.Equal(t, http.StatusCreated, w.Code, "create should return 201: %s", w.Body.String())
 

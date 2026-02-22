@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"sync"
@@ -13,12 +14,27 @@ import (
 
 // Handler holds dependencies for all API handlers.
 type Handler struct {
-	docker DockerClient
+	docker     DockerClient
+	baseDomain string // base domain for proxy URLs (e.g. "localhost")
+	proxyAddr  string // proxy listen address (e.g. ":3000")
 }
 
-// New creates a Handler with the given Docker client.
-func New(d DockerClient) *Handler {
-	return &Handler{docker: d}
+// New creates a Handler with the given Docker client and proxy config.
+func New(d DockerClient, baseDomain, proxyAddr string) *Handler {
+	return &Handler{docker: d, baseDomain: baseDomain, proxyAddr: proxyAddr}
+}
+
+// proxyURL builds the proxy URL for a named sandbox.
+// Returns "http://mi-app.localhost" when proxy listens on :80,
+// or "http://mi-app.localhost:3000" for non-standard ports.
+func (h *Handler) proxyURL(name string) string {
+	if name == "" {
+		return ""
+	}
+	if h.proxyAddr == ":80" || h.proxyAddr == ":443" {
+		return fmt.Sprintf("http://%s.%s", name, h.baseDomain)
+	}
+	return fmt.Sprintf("http://%s.%s%s", name, h.baseDomain, h.proxyAddr)
 }
 
 // healthCheck handles GET /health.
@@ -54,6 +70,10 @@ func (h *Handler) listSandboxes(c *gin.Context) {
 	if err != nil {
 		internalError(c, err)
 		return
+	}
+
+	for i := range items {
+		items[i].URL = h.proxyURL(items[i].Name)
 	}
 
 	if len(items) == 0 {
@@ -112,6 +132,7 @@ func (h *Handler) createSandbox(c *gin.Context) {
 		return
 	}
 
+	result.URL = h.proxyURL(result.Name)
 	c.JSON(http.StatusCreated, result)
 }
 
@@ -133,6 +154,7 @@ func (h *Handler) getSandbox(c *gin.Context) {
 		return
 	}
 
+	info.URL = h.proxyURL(info.Name)
 	c.JSON(http.StatusOK, info)
 }
 

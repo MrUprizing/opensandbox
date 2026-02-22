@@ -53,15 +53,19 @@ definitions:
   models.CreateSandboxRequest:
     properties:
       env:
+        description: extra environment variables (e.g. ["KEY=VALUE"])
         items:
           type: string
         type: array
       image:
-        type: string
-      name:
+        example: node:24
         type: string
       ports:
-        description: 'container ports to expose: ["80/tcp", "443/tcp"]'
+        description: container ports to expose, e.g. ["3000", "8080/tcp"]. First port
+          is the default for proxy routing.
+        example:
+        - "3000"
+        - "8080"
         items:
           type: string
         type: array
@@ -71,6 +75,7 @@ definitions:
         description: CPU/memory limits, nil = defaults (1GB RAM, 1 vCPU)
       timeout:
         description: seconds until auto-stop, 0 = default (900s)
+        example: 900
         type: integer
     required:
     - image
@@ -79,24 +84,34 @@ definitions:
     properties:
       id:
         type: string
+      name:
+        description: auto-generated name (e.g. "eager-turing")
+        type: string
       ports:
-        additionalProperties:
+        description: exposed container ports, e.g. ["3000/tcp", "8080/tcp"]
+        items:
           type: string
-        description: '"80/tcp": "32768"'
-        type: object
+        type: array
+      url:
+        description: proxy URL, e.g. "http://eager-turing.localhost"
+        type: string
     type: object
   models.ExecCommandRequest:
     properties:
       args:
         description: arguments (e.g. ["install"])
+        example:
+        - install
         items:
           type: string
         type: array
       command:
         description: executable name (e.g. "npm")
+        example: npm
         type: string
       cwd:
         description: working directory
+        example: /app
         type: string
       env:
         additionalProperties:
@@ -123,6 +138,7 @@ definitions:
   models.FileWriteRequest:
     properties:
       content:
+        example: console.log('hello')
         type: string
     required:
     - content
@@ -152,6 +168,7 @@ definitions:
     properties:
       image:
         description: image name with optional tag (e.g. "nginx:latest")
+        example: node:22
         type: string
     required:
     - image
@@ -167,6 +184,7 @@ definitions:
     properties:
       signal:
         description: POSIX signal number (15=SIGTERM, 9=SIGKILL)
+        example: 15
         type: integer
     required:
     - signal
@@ -187,6 +205,7 @@ definitions:
     properties:
       timeout:
         description: new TTL in seconds
+        example: 900
         type: integer
     required:
     - timeout
@@ -202,10 +221,12 @@ definitions:
     properties:
       cpus:
         description: 'fractional CPU limit (e.g. 1.5). Default: 1.0, Max: 4.0'
+        example: 1
         type: number
       memory:
         description: 'memory limit in MB (e.g. 512 = 512MB). Default: 1024 (1GB),
           Max: 8192 (8GB)'
+        example: 1024
         type: integer
     type: object
   models.RestartResponse:
@@ -213,9 +234,9 @@ definitions:
       expires_at:
         type: string
       ports:
-        additionalProperties:
+        items:
           type: string
-        type: object
+        type: array
       status:
         type: string
     type: object
@@ -232,9 +253,9 @@ definitions:
       name:
         type: string
       ports:
-        additionalProperties:
+        items:
           type: string
-        type: object
+        type: array
       resources:
         $ref: '#/definitions/models.ResourceLimits'
       running:
@@ -242,6 +263,8 @@ definitions:
       started_at:
         type: string
       status:
+        type: string
+      url:
         type: string
     type: object
   models.SandboxStats:

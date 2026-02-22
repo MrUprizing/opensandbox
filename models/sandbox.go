@@ -4,64 +4,67 @@ import "time"
 
 // ResourceLimits defines CPU and memory constraints for a sandbox.
 type ResourceLimits struct {
-	Memory int64   `json:"memory"` // memory limit in MB (e.g. 512 = 512MB). Default: 1024 (1GB), Max: 8192 (8GB)
-	CPUs   float64 `json:"cpus"`   // fractional CPU limit (e.g. 1.5). Default: 1.0, Max: 4.0
+	Memory int64   `json:"memory" example:"1024"` // memory limit in MB (e.g. 512 = 512MB). Default: 1024 (1GB), Max: 8192 (8GB)
+	CPUs   float64 `json:"cpus" example:"1.0"`    // fractional CPU limit (e.g. 1.5). Default: 1.0, Max: 4.0
 }
 
 // CreateSandboxRequest is the body for POST /v1/sandboxes
 type CreateSandboxRequest struct {
-	Image     string          `json:"image" binding:"required"`
-	Name      string          `json:"name"`
-	Env       []string        `json:"env"`
-	Ports     []string        `json:"ports"`     // container ports to expose: ["80/tcp", "443/tcp"]
-	Timeout   int             `json:"timeout"`   // seconds until auto-stop, 0 = default (900s)
-	Resources *ResourceLimits `json:"resources"` // CPU/memory limits, nil = defaults (1GB RAM, 1 vCPU)
+	Image     string          `json:"image" binding:"required" example:"node:24"`
+	Ports     []string        `json:"ports" example:"3000,8080"` // container ports to expose, e.g. ["3000", "8080/tcp"]. First port is the default for proxy routing.
+	Timeout   int             `json:"timeout" example:"900"`     // seconds until auto-stop, 0 = default (900s)
+	Resources *ResourceLimits `json:"resources"`                 // CPU/memory limits, nil = defaults (1GB RAM, 1 vCPU)
+	Env       []string        `json:"env"`                       // extra environment variables (e.g. ["KEY=VALUE"])
 }
 
 // CreateSandboxResponse is the response for POST /v1/sandboxes
 type CreateSandboxResponse struct {
-	ID    string            `json:"id"`
-	Ports map[string]string `json:"ports"` // "80/tcp": "32768"
+	ID    string   `json:"id"`
+	Name  string   `json:"name"`          // auto-generated name (e.g. "eager-turing")
+	Ports []string `json:"ports"`         // exposed container ports, e.g. ["3000/tcp", "8080/tcp"]
+	URL   string   `json:"url,omitempty"` // proxy URL, e.g. "http://eager-turing.localhost"
 }
 
 // SandboxSummary is a concise view of a sandbox for list endpoints.
 type SandboxSummary struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name"`
-	Image     string            `json:"image"`
-	Status    string            `json:"status"`
-	State     string            `json:"state"`
-	Ports     map[string]string `json:"ports"`
-	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Image     string     `json:"image"`
+	Status    string     `json:"status"`
+	State     string     `json:"state"`
+	Ports     []string   `json:"ports"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	URL       string     `json:"url,omitempty"`
 }
 
 // SandboxDetail is the full inspect response with only relevant fields.
 type SandboxDetail struct {
-	ID         string            `json:"id"`
-	Name       string            `json:"name"`
-	Image      string            `json:"image"`
-	Status     string            `json:"status"`
-	Running    bool              `json:"running"`
-	Ports      map[string]string `json:"ports"`
-	Resources  ResourceLimits    `json:"resources"`
-	StartedAt  string            `json:"started_at"`
-	FinishedAt string            `json:"finished_at"`
-	ExpiresAt  *time.Time        `json:"expires_at,omitempty"`
+	ID         string         `json:"id"`
+	Name       string         `json:"name"`
+	Image      string         `json:"image"`
+	Status     string         `json:"status"`
+	Running    bool           `json:"running"`
+	Ports      []string       `json:"ports"`
+	Resources  ResourceLimits `json:"resources"`
+	StartedAt  string         `json:"started_at"`
+	FinishedAt string         `json:"finished_at"`
+	ExpiresAt  *time.Time     `json:"expires_at,omitempty"`
+	URL        string         `json:"url,omitempty"`
 }
 
 // RestartResponse is the response for POST /v1/sandboxes/:id/restart
 type RestartResponse struct {
-	Status    string            `json:"status"`
-	Ports     map[string]string `json:"ports"`
-	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
+	Status    string     `json:"status"`
+	Ports     []string   `json:"ports"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 // ExecCommandRequest is the body for POST /v1/sandboxes/:id/cmd
 type ExecCommandRequest struct {
-	Command string            `json:"command" binding:"required"` // executable name (e.g. "npm")
-	Args    []string          `json:"args"`                       // arguments (e.g. ["install"])
-	Cwd     string            `json:"cwd"`                        // working directory
-	Env     map[string]string `json:"env"`                        // extra environment variables
+	Command string            `json:"command" binding:"required" example:"npm"` // executable name (e.g. "npm")
+	Args    []string          `json:"args" example:"install"`                   // arguments (e.g. ["install"])
+	Cwd     string            `json:"cwd" example:"/app"`                       // working directory
+	Env     map[string]string `json:"env"`                                      // extra environment variables
 }
 
 // CommandDetail represents a command executed in a sandbox.
@@ -88,7 +91,7 @@ type CommandListResponse struct {
 
 // KillCommandRequest is the body for POST /v1/sandboxes/:id/cmd/:cmdId/kill
 type KillCommandRequest struct {
-	Signal int `json:"signal" binding:"required"` // POSIX signal number (15=SIGTERM, 9=SIGKILL)
+	Signal int `json:"signal" binding:"required" example:"15"` // POSIX signal number (15=SIGTERM, 9=SIGKILL)
 }
 
 // FileReadResponse is the response for GET /v1/sandboxes/:id/files
@@ -99,7 +102,7 @@ type FileReadResponse struct {
 
 // FileWriteRequest is the body for PUT /v1/sandboxes/:id/files
 type FileWriteRequest struct {
-	Content string `json:"content" binding:"required"`
+	Content string `json:"content" binding:"required" example:"console.log('hello')"`
 }
 
 // FileListResponse is the response for GET /v1/sandboxes/:id/files/list
@@ -110,7 +113,7 @@ type FileListResponse struct {
 
 // RenewExpirationRequest is the body for POST /v1/sandboxes/:id/renew-expiration
 type RenewExpirationRequest struct {
-	Timeout int `json:"timeout" binding:"required"` // new TTL in seconds
+	Timeout int `json:"timeout" binding:"required" example:"900"` // new TTL in seconds
 }
 
 // RenewExpirationResponse is the response for POST /v1/sandboxes/:id/renew-expiration
@@ -121,7 +124,7 @@ type RenewExpirationResponse struct {
 
 // ImagePullRequest is the body for POST /v1/images/pull
 type ImagePullRequest struct {
-	Image string `json:"image" binding:"required"` // image name with optional tag (e.g. "nginx:latest")
+	Image string `json:"image" binding:"required" example:"node:22"` // image name with optional tag (e.g. "nginx:latest")
 }
 
 // ImagePullResponse is the response for POST /v1/images/pull
