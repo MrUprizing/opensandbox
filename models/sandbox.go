@@ -11,7 +11,6 @@ type ResourceLimits struct {
 // CreateSandboxRequest is the body for POST /v1/sandboxes
 type CreateSandboxRequest struct {
 	Image     string          `json:"image" binding:"required"`
-	Name      string          `json:"name"`
 	Env       []string        `json:"env"`
 	Port      string          `json:"port"`      // container port to expose, e.g. "3000/tcp"
 	Timeout   int             `json:"timeout"`   // seconds until auto-stop, 0 = default (900s)
@@ -21,8 +20,9 @@ type CreateSandboxRequest struct {
 // CreateSandboxResponse is the response for POST /v1/sandboxes
 type CreateSandboxResponse struct {
 	ID    string            `json:"id"`
+	Name  string            `json:"name"`          // auto-generated name (e.g. "eager-turing")
 	Ports map[string]string `json:"ports"`         // "80/tcp": "32768"
-	URL   string            `json:"url,omitempty"` // proxy URL, e.g. "http://mi-app.localhost:3000"
+	URL   string            `json:"url,omitempty"` // proxy URL, e.g. "http://eager-turing.localhost:3000"
 }
 
 // SandboxSummary is a concise view of a sandbox for list endpoints.

@@ -58,8 +58,6 @@ definitions:
         type: array
       image:
         type: string
-      name:
-        type: string
       port:
         description: container port to expose, e.g. "3000/tcp"
         type: string
@@ -77,13 +75,16 @@ definitions:
     properties:
       id:
         type: string
+      name:
+        description: auto-generated name (e.g. "eager-turing")
+        type: string
       ports:
         additionalProperties:
           type: string
         description: '"80/tcp": "32768"'
         type: object
       url:
-        description: proxy URL, e.g. "http://mi-app.localhost:3000"
+        description: proxy URL, e.g. "http://eager-turing.localhost:3000"
         type: string
     type: object
   models.ExecCommandRequest:

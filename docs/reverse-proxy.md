@@ -11,25 +11,25 @@ Access sandbox services via subdomain (`my-app.localhost:3000`) instead of raw D
 
 ## Creating a Sandbox with Proxy
 
-Include `name` and `port` in the create request:
+Include `port` in the create request. A unique name is auto-generated:
 
 ```bash
 curl -X POST localhost:8080/v1/sandboxes \
   -H "Content-Type: application/json" \
   -d '{
     "image": "node:22",
-    "name": "my-app",
     "port": "3000/tcp"
   }'
 ```
 
-Response includes the proxy URL:
+Response includes the auto-generated name and proxy URL:
 
 ```json
 {
   "id": "a1b2c3d4...",
+  "name": "eager-turing",
   "ports": { "3000/tcp": "32768" },
-  "url": "http://my-app.localhost:3000"
+  "url": "http://eager-turing.localhost:3000"
 }
 ```
 
@@ -43,7 +43,7 @@ go run ./cmd/api
 # Proxy → *.localhost:3000
 ```
 
-Open `http://my-app.localhost:3000` in your browser.
+Open `http://eager-turing.localhost:3000` in your browser (use the name from the create response).
 
 ### If `*.localhost` doesn't resolve
 
@@ -76,7 +76,7 @@ API_KEY=your-secret \
 go run ./cmd/api
 ```
 
-Sandboxes are now accessible at `http://my-app.sandbox.example.com`.
+Sandboxes are now accessible at `http://<name>.sandbox.example.com`.
 
 ### 3. HTTPS (optional)
 

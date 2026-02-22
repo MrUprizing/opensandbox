@@ -228,10 +228,16 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 		NanoCPUs: int64(cpus * 1e9),
 	}
 
+	// Auto-generate a unique sandbox name.
+	name := generateUniqueName(func(n string) bool {
+		sb, _ := c.repo.FindByName(n)
+		return sb != nil
+	})
+
 	result, err := c.cli.ContainerCreate(ctx, moby.ContainerCreateOptions{
 		Config:     cfg,
 		HostConfig: hostCfg,
-		Name:       req.Name,
+		Name:       name,
 	})
 	if err != nil {
 		return models.CreateSandboxResponse{}, err
@@ -256,12 +262,6 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 
 	ports := extractPorts(info.Container.NetworkSettings.Ports)
 
-	// Use the Docker-assigned name if none was provided in the request.
-	name := req.Name
-	if name == "" {
-		name = strings.TrimPrefix(info.Container.Name, "/")
-	}
-
 	// Persist sandbox (fire-and-forget: log errors, don't block).
 	if err := c.repo.Save(database.Sandbox{
 		ID:    result.ID,
@@ -275,6 +275,7 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 
 	return models.CreateSandboxResponse{
 		ID:    result.ID,
+		Name:  name,
 		Ports: ports,
 	}, nil
 }

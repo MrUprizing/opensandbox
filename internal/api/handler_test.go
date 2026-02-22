@@ -227,19 +227,26 @@ func TestListSandboxes(t *testing.T) {
 func TestCreateSandbox(t *testing.T) {
 	r := newRouter(&stub{
 		create: func(req models.CreateSandboxRequest) (models.CreateSandboxResponse, error) {
-			return models.CreateSandboxResponse{ID: "abc123", Ports: map[string]string{"3000/tcp": "32768"}}, nil
+			return models.CreateSandboxResponse{
+				ID:    "abc123",
+				Name:  "eager-turing",
+				Ports: map[string]string{"3000/tcp": "32768"},
+			}, nil
 		},
 	})
 
 	w := do(r, "POST", "/v1/sandboxes", map[string]any{"image": "nextjs-docker:latest"})
 	assert.Equal(t, 201, w.Code)
-	assert.Contains(t, w.Body.String(), "abc123")
+	body := w.Body.String()
+	assert.Contains(t, body, "abc123")
+	assert.Contains(t, body, "eager-turing")
+	assert.Contains(t, body, "http://eager-turing.localhost:3000")
 }
 
 func TestCreateSandbox_MissingImage(t *testing.T) {
 	r := newRouter(&stub{})
 
-	w := do(r, "POST", "/v1/sandboxes", map[string]any{"name": "test"})
+	w := do(r, "POST", "/v1/sandboxes", map[string]any{"port": "3000"})
 	assert.Equal(t, 400, w.Code)
 	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
 }

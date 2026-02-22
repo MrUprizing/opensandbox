@@ -128,7 +128,7 @@ func (h *Handler) createSandbox(c *gin.Context) {
 		return
 	}
 
-	result.URL = h.proxyURL(req.Name)
+	result.URL = h.proxyURL(result.Name)
 	c.JSON(http.StatusCreated, result)
 }
 

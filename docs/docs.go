@@ -1366,9 +1366,6 @@ const docTemplate = `{
                 "image": {
                     "type": "string"
                 },
-                "name": {
-                    "type": "string"
-                },
                 "port": {
                     "description": "container port to expose, e.g. \"3000/tcp\"",
                     "type": "string"
@@ -1393,6 +1390,10 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "name": {
+                    "description": "auto-generated name (e.g. \"eager-turing\")",
+                    "type": "string"
+                },
                 "ports": {
                     "description": "\"80/tcp\": \"32768\"",
                     "type": "object",
@@ -1401,7 +1402,7 @@ const docTemplate = `{
                     }
                 },
                 "url": {
-                    "description": "proxy URL, e.g. \"http://mi-app.localhost:3000\"",
+                    "description": "proxy URL, e.g. \"http://eager-turing.localhost:3000\"",
                     "type": "string"
                 }
             }
