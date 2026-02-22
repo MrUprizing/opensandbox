@@ -72,6 +72,14 @@ func internalError(c *gin.Context, err error) {
 		conflict(c, err.Error())
 		return
 	}
+	if errors.Is(err, docker.ErrCommandNotFound) {
+		notFound(c, "command")
+		return
+	}
+	if errors.Is(err, docker.ErrCommandFinished) {
+		conflict(c, err.Error())
+		return
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		requestTimeout(c, "operation timed out")
 		return

@@ -379,14 +379,58 @@
                 }
             }
         },
-        "/sandboxes/{id}/exec": {
+        "/sandboxes/{id}/cmd": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Returns all commands executed in the sandbox.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commands"
+                ],
+                "summary": "List commands",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.CommandListResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
             "post": {
                 "security": [
                     {
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Run an arbitrary command inside the sandbox and return separated stdout, stderr, and exit code.",
+                "description": "Execute a command asynchronously inside the sandbox. Returns a command ID immediately. Use ?wait=true to stream ND-JSON until completion.",
                 "consumes": [
                     "application/json"
                 ],
@@ -394,7 +438,7 @@
                     "application/json"
                 ],
                 "tags": [
-                    "sandboxes"
+                    "commands"
                 ],
                 "summary": "Execute a command",
                 "parameters": [
@@ -411,7 +455,149 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/models.ExecRequest"
+                            "$ref": "#/definitions/models.ExecCommandRequest"
+                        }
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Block until command finishes (ND-JSON stream)",
+                        "name": "wait",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.CommandResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandboxes/{id}/cmd/{cmdId}": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Returns the status of a command. Use ?wait=true to block until the command finishes (ND-JSON stream).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commands"
+                ],
+                "summary": "Get command status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Command ID",
+                        "name": "cmdId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Block until command finishes (ND-JSON stream)",
+                        "name": "wait",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.CommandResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandboxes/{id}/cmd/{cmdId}/kill": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Send a POSIX signal to a running command.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commands"
+                ],
+                "summary": "Kill a command",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Command ID",
+                        "name": "cmdId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Signal to send",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.KillCommandRequest"
                         }
                     }
                 ],
@@ -419,13 +605,72 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/models.ExecResult"
+                            "$ref": "#/definitions/models.CommandResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandboxes/{id}/cmd/{cmdId}/logs": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Stream stdout and stderr of a command as ND-JSON lines.",
+                "produces": [
+                    "application/x-ndjson"
+                ],
+                "tags": [
+                    "commands"
+                ],
+                "summary": "Stream command logs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Command ID",
+                        "name": "cmdId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "ND-JSON stream",
+                        "schema": {
+                            "type": "string"
                         }
                     },
                     "404": {
@@ -660,80 +905,6 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/models.FileListResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/sandboxes/{id}/logs": {
-            "get": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "Returns container logs. Use follow=true for real-time SSE streaming.",
-                "produces": [
-                    "application/json",
-                    "text/event-stream"
-                ],
-                "tags": [
-                    "sandboxes"
-                ],
-                "summary": "Get container logs",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Sandbox ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Last N lines (default 100, 0 = all)",
-                        "name": "tail",
-                        "in": "query"
-                    },
-                    {
-                        "type": "boolean",
-                        "description": "Stream logs in real-time via SSE",
-                        "name": "follow",
-                        "in": "query"
-                    },
-                    {
-                        "type": "boolean",
-                        "description": "Include timestamps",
-                        "name": "timestamps",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "logs output",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     },
                     "404": {
@@ -1115,18 +1286,71 @@
                 }
             }
         },
+        "models.CommandDetail": {
+            "type": "object",
+            "properties": {
+                "args": {
+                    "description": "arguments",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "cwd": {
+                    "description": "working directory",
+                    "type": "string"
+                },
+                "exit_code": {
+                    "description": "nil while running",
+                    "type": "integer"
+                },
+                "finished_at": {
+                    "description": "unix milliseconds, nil while running",
+                    "type": "integer"
+                },
+                "id": {
+                    "description": "cmd_\u003chex\u003e",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "executable name",
+                    "type": "string"
+                },
+                "sandbox_id": {
+                    "description": "parent sandbox container ID",
+                    "type": "string"
+                },
+                "started_at": {
+                    "description": "unix milliseconds",
+                    "type": "integer"
+                }
+            }
+        },
+        "models.CommandListResponse": {
+            "type": "object",
+            "properties": {
+                "commands": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.CommandDetail"
+                    }
+                }
+            }
+        },
+        "models.CommandResponse": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "$ref": "#/definitions/models.CommandDetail"
+                }
+            }
+        },
         "models.CreateSandboxRequest": {
             "type": "object",
             "required": [
                 "image"
             ],
             "properties": {
-                "cmd": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
                 "env": {
                     "type": "array",
                     "items": {
@@ -1175,31 +1399,33 @@
                 }
             }
         },
-        "models.ExecRequest": {
+        "models.ExecCommandRequest": {
             "type": "object",
             "required": [
-                "cmd"
+                "command"
             ],
             "properties": {
-                "cmd": {
+                "args": {
+                    "description": "arguments (e.g. [\"install\"])",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
-                }
-            }
-        },
-        "models.ExecResult": {
-            "type": "object",
-            "properties": {
-                "exit_code": {
-                    "type": "integer"
                 },
-                "stderr": {
+                "command": {
+                    "description": "executable name (e.g. \"npm\")",
                     "type": "string"
                 },
-                "stdout": {
+                "cwd": {
+                    "description": "working directory",
                     "type": "string"
+                },
+                "env": {
+                    "description": "extra environment variables",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -1286,6 +1512,18 @@
                 },
                 "status": {
                     "type": "string"
+                }
+            }
+        },
+        "models.KillCommandRequest": {
+            "type": "object",
+            "required": [
+                "signal"
+            ],
+            "properties": {
+                "signal": {
+                    "description": "POSIX signal number (15=SIGTERM, 9=SIGKILL)",
+                    "type": "integer"
                 }
             }
         },

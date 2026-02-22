@@ -20,8 +20,12 @@ type DockerClient interface {
 	Pause(ctx context.Context, id string) error
 	Resume(ctx context.Context, id string) error
 	RenewExpiration(ctx context.Context, id string, timeout int) error
-	Exec(ctx context.Context, id string, cmd []string) (models.ExecResult, error)
-	Logs(ctx context.Context, id string, opts models.LogsOptions) (io.ReadCloser, error)
+	ExecCommand(ctx context.Context, sandboxID string, req models.ExecCommandRequest) (models.CommandDetail, error)
+	GetCommand(ctx context.Context, sandboxID, cmdID string) (models.CommandDetail, error)
+	ListCommands(ctx context.Context, sandboxID string) ([]models.CommandDetail, error)
+	KillCommand(ctx context.Context, sandboxID, cmdID string, signal int) (models.CommandDetail, error)
+	StreamCommandLogs(ctx context.Context, sandboxID, cmdID string) (io.ReadCloser, io.ReadCloser, error)
+	WaitCommand(ctx context.Context, sandboxID, cmdID string) (models.CommandDetail, error)
 	Stats(ctx context.Context, id string) (models.SandboxStats, error)
 	ReadFile(ctx context.Context, id, path string) (string, error)
 	WriteFile(ctx context.Context, id, path, content string) error

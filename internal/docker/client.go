@@ -3,6 +3,8 @@ package docker
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,9 +25,23 @@ import (
 
 // Client wraps the Docker SDK and exposes sandbox operations.
 type Client struct {
-	cli    *moby.Client
-	repo   *database.Repository
-	timers sync.Map // map[containerID]*timerEntry
+	cli      *moby.Client
+	repo     *database.Repository
+	timers   sync.Map // map[containerID]*timerEntry
+	commands sync.Map // map[cmdID]*runningCommand
+}
+
+// runningCommand tracks a command that is currently executing.
+type runningCommand struct {
+	execID    string             // Docker exec instance ID
+	sandboxID string             // parent sandbox container ID
+	cancel    context.CancelFunc // cancels the exec context
+	stdout    *ringBuffer        // captures stdout
+	stderr    *ringBuffer        // captures stderr
+	done      chan struct{}      // closed when command finishes
+	mu        sync.Mutex
+	exitCode  int
+	finished  bool
 }
 
 // timerEntry holds a timer and a cancel channel to avoid goroutine leaks.
@@ -168,10 +184,8 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 	cfg := &container.Config{
 		Image:        req.Image,
 		Env:          req.Env,
+		Cmd:          []string{"sleep", "infinity"},
 		ExposedPorts: buildExposedPorts(req.Ports),
-	}
-	if len(req.Cmd) > 0 {
-		cfg.Cmd = req.Cmd
 	}
 
 	hostCfg := &container.HostConfig{PublishAllPorts: true}
@@ -367,9 +381,24 @@ func (c *Client) Restart(ctx context.Context, id string) (models.RestartResponse
 // If the container no longer exists in Docker, it still cleans up the DB record.
 func (c *Client) Remove(ctx context.Context, id string) error {
 	c.cancelTimer(id)
+
+	// Kill all running commands for this sandbox.
+	c.commands.Range(func(key, value any) bool {
+		rc := value.(*runningCommand)
+		if rc.sandboxID == id {
+			rc.cancel()
+		}
+		return true
+	})
+
 	_, err := c.cli.ContainerRemove(ctx, id, moby.ContainerRemoveOptions{Force: true})
 	if err != nil && !errdefs.IsNotFound(err) {
 		return err
+	}
+
+	// Clean up command records from DB.
+	if dbErr := c.repo.DeleteCommandsBySandbox(id); dbErr != nil {
+		log.Printf("database: failed to delete commands for sandbox %s: %v", id, dbErr)
 	}
 
 	if dbErr := c.repo.Delete(id); dbErr != nil {
@@ -424,29 +453,6 @@ func (c *Client) RenewExpiration(ctx context.Context, id string, timeout int) er
 	return nil
 }
 
-// Logs returns the container log stream. The caller must close the returned ReadCloser.
-// The stream is multiplexed (8-byte header per frame) when the container is not using a TTY.
-func (c *Client) Logs(ctx context.Context, id string, opts models.LogsOptions) (io.ReadCloser, error) {
-	tail := "100"
-	if opts.Tail > 0 {
-		tail = fmt.Sprintf("%d", opts.Tail)
-	} else if opts.Tail == 0 && opts.Follow {
-		tail = "0" // follow from now, no history
-	}
-
-	rc, err := c.cli.ContainerLogs(ctx, id, moby.ContainerLogsOptions{
-		ShowStdout: true,
-		ShowStderr: true,
-		Follow:     opts.Follow,
-		Timestamps: opts.Timestamps,
-		Tail:       tail,
-	})
-	if err != nil {
-		return nil, wrapNotFound(err)
-	}
-	return rc, nil
-}
-
 // Stats returns a curated snapshot of container resource usage.
 func (c *Client) Stats(ctx context.Context, id string) (models.SandboxStats, error) {
 	result, err := c.cli.ContainerStats(ctx, id, moby.ContainerStatsOptions{
@@ -487,32 +493,300 @@ func (c *Client) Stats(ctx context.Context, id string) (models.SandboxStats, err
 	}, nil
 }
 
-// Exec runs a command inside a sandbox and returns separated stdout, stderr, and exit code.
-// Returns ErrNotRunning (409) if the sandbox is not in a running state.
-func (c *Client) Exec(ctx context.Context, id string, cmd []string) (models.ExecResult, error) {
-	info, err := c.cli.ContainerInspect(ctx, id, moby.ContainerInspectOptions{})
+// generateCmdID creates a command ID: cmd_ + 40 hex chars.
+func generateCmdID() string {
+	b := make([]byte, 20)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return "cmd_" + hex.EncodeToString(b)
+}
+
+// ExecCommand creates and starts a command asynchronously inside a sandbox.
+// Returns the CommandDetail immediately (no exit_code yet).
+func (c *Client) ExecCommand(ctx context.Context, sandboxID string, req models.ExecCommandRequest) (models.CommandDetail, error) {
+	// Verify sandbox is running.
+	info, err := c.cli.ContainerInspect(ctx, sandboxID, moby.ContainerInspectOptions{})
 	if err != nil {
-		return models.ExecResult{}, wrapNotFound(err)
+		return models.CommandDetail{}, wrapNotFound(err)
 	}
 	if !info.Container.State.Running {
-		return models.ExecResult{}, ErrNotRunning
+		return models.CommandDetail{}, ErrNotRunning
 	}
 
-	return c.execWithStdin(ctx, id, cmd, nil)
+	cmdID := generateCmdID()
+	now := time.Now().UnixMilli()
+
+	// Build full command.
+	fullCmd := append([]string{req.Command}, req.Args...)
+
+	// Build env slice.
+	var envSlice []string
+	for k, v := range req.Env {
+		envSlice = append(envSlice, k+"="+v)
+	}
+
+	// Create Docker exec instance.
+	execOpts := moby.ExecCreateOptions{
+		AttachStdout: true,
+		AttachStderr: true,
+		Cmd:          fullCmd,
+		Env:          envSlice,
+	}
+	if req.Cwd != "" {
+		execOpts.WorkingDir = req.Cwd
+	}
+
+	execCfg, err := c.cli.ExecCreate(ctx, sandboxID, execOpts)
+	if err != nil {
+		return models.CommandDetail{}, wrapNotFound(err)
+	}
+
+	// Persist command to DB.
+	argsJSON, _ := json.Marshal(req.Args)
+	if err := c.repo.SaveCommand(database.Command{
+		ID:        cmdID,
+		SandboxID: sandboxID,
+		Name:      req.Command,
+		Args:      string(argsJSON),
+		Cwd:       req.Cwd,
+		StartedAt: now,
+	}); err != nil {
+		return models.CommandDetail{}, fmt.Errorf("save command: %w", err)
+	}
+
+	// Set up ring buffers and tracking.
+	stdoutBuf := newRingBuffer(defaultRingSize)
+	stderrBuf := newRingBuffer(defaultRingSize)
+	execCtx, cancel := context.WithCancel(context.Background())
+
+	rc := &runningCommand{
+		execID:    execCfg.ID,
+		sandboxID: sandboxID,
+		cancel:    cancel,
+		stdout:    stdoutBuf,
+		stderr:    stderrBuf,
+		done:      make(chan struct{}),
+	}
+	c.commands.Store(cmdID, rc)
+
+	// Launch goroutine to attach and stream output.
+	go func() {
+		defer func() {
+			stdoutBuf.Close()
+			stderrBuf.Close()
+			close(rc.done)
+
+			// Schedule cleanup from map after 5 minutes.
+			time.AfterFunc(5*time.Minute, func() {
+				c.commands.Delete(cmdID)
+			})
+		}()
+
+		attached, err := c.cli.ExecAttach(execCtx, execCfg.ID, moby.ExecAttachOptions{})
+		if err != nil {
+			log.Printf("exec attach %s: %v", cmdID, err)
+			rc.mu.Lock()
+			rc.exitCode = -1
+			rc.finished = true
+			rc.mu.Unlock()
+			c.repo.UpdateCommandFinished(cmdID, -1, time.Now().UnixMilli())
+			return
+		}
+		defer attached.Close()
+
+		// Demux stdout/stderr into ring buffers.
+		stdcopy.StdCopy(stdoutBuf, stderrBuf, attached.Reader)
+
+		// Get exit code.
+		exitCode := -1
+		inspect, err := c.cli.ExecInspect(context.Background(), execCfg.ID, moby.ExecInspectOptions{})
+		if err == nil {
+			exitCode = inspect.ExitCode
+		}
+
+		finishedAt := time.Now().UnixMilli()
+		rc.mu.Lock()
+		rc.exitCode = exitCode
+		rc.finished = true
+		rc.mu.Unlock()
+
+		c.repo.UpdateCommandFinished(cmdID, exitCode, finishedAt)
+	}()
+
+	return models.CommandDetail{
+		ID:        cmdID,
+		Name:      req.Command,
+		Args:      req.Args,
+		Cwd:       req.Cwd,
+		SandboxID: sandboxID,
+		StartedAt: now,
+	}, nil
+}
+
+// GetCommand returns command details by ID.
+func (c *Client) GetCommand(ctx context.Context, sandboxID, cmdID string) (models.CommandDetail, error) {
+	dbCmd, err := c.repo.FindCommandByID(cmdID)
+	if err != nil {
+		return models.CommandDetail{}, err
+	}
+	if dbCmd == nil {
+		return models.CommandDetail{}, ErrCommandNotFound
+	}
+	if dbCmd.SandboxID != sandboxID {
+		return models.CommandDetail{}, ErrCommandNotFound
+	}
+
+	return c.dbCommandToDetail(*dbCmd), nil
+}
+
+// ListCommands returns all commands for a sandbox.
+func (c *Client) ListCommands(ctx context.Context, sandboxID string) ([]models.CommandDetail, error) {
+	// Verify sandbox exists.
+	if _, err := c.cli.ContainerInspect(ctx, sandboxID, moby.ContainerInspectOptions{}); err != nil {
+		return nil, wrapNotFound(err)
+	}
+
+	dbCmds, err := c.repo.FindCommandsBySandbox(sandboxID)
+	if err != nil {
+		return nil, err
+	}
+
+	details := make([]models.CommandDetail, 0, len(dbCmds))
+	for _, cmd := range dbCmds {
+		details = append(details, c.dbCommandToDetail(cmd))
+	}
+	return details, nil
+}
+
+// KillCommand sends a signal to a running command.
+func (c *Client) KillCommand(ctx context.Context, sandboxID, cmdID string, signal int) (models.CommandDetail, error) {
+	// Look up running command.
+	v, ok := c.commands.Load(cmdID)
+	if !ok {
+		// Check if it exists in DB.
+		dbCmd, err := c.repo.FindCommandByID(cmdID)
+		if err != nil {
+			return models.CommandDetail{}, err
+		}
+		if dbCmd == nil {
+			return models.CommandDetail{}, ErrCommandNotFound
+		}
+		return models.CommandDetail{}, ErrCommandFinished
+	}
+
+	rc := v.(*runningCommand)
+	rc.mu.Lock()
+	if rc.finished {
+		rc.mu.Unlock()
+		return models.CommandDetail{}, ErrCommandFinished
+	}
+	if rc.sandboxID != sandboxID {
+		rc.mu.Unlock()
+		return models.CommandDetail{}, ErrCommandNotFound
+	}
+	execID := rc.execID
+	rc.mu.Unlock()
+
+	// Get the PID via ExecInspect.
+	inspect, err := c.cli.ExecInspect(ctx, execID, moby.ExecInspectOptions{})
+	if err != nil {
+		return models.CommandDetail{}, fmt.Errorf("exec inspect: %w", err)
+	}
+
+	// Run kill -<signal> <pid> inside the container.
+	killCmd := fmt.Sprintf("kill -%d %d", signal, inspect.PID)
+	_, err = c.execWithStdin(ctx, sandboxID, []string{"sh", "-c", killCmd}, nil)
+	if err != nil {
+		return models.CommandDetail{}, fmt.Errorf("kill command: %w", err)
+	}
+
+	// Wait briefly for the command to finish, then return current state.
+	select {
+	case <-rc.done:
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	return c.GetCommand(ctx, sandboxID, cmdID)
+}
+
+// StreamCommandLogs returns readers for stdout and stderr of a command.
+func (c *Client) StreamCommandLogs(ctx context.Context, sandboxID, cmdID string) (io.ReadCloser, io.ReadCloser, error) {
+	v, ok := c.commands.Load(cmdID)
+	if !ok {
+		return nil, nil, ErrCommandNotFound
+	}
+
+	rc := v.(*runningCommand)
+	if rc.sandboxID != sandboxID {
+		return nil, nil, ErrCommandNotFound
+	}
+
+	return rc.stdout.NewReader(), rc.stderr.NewReader(), nil
+}
+
+// WaitCommand blocks until a command finishes and returns the updated detail.
+func (c *Client) WaitCommand(ctx context.Context, sandboxID, cmdID string) (models.CommandDetail, error) {
+	v, ok := c.commands.Load(cmdID)
+	if !ok {
+		// Already finished and cleaned up, or doesn't exist.
+		return c.GetCommand(ctx, sandboxID, cmdID)
+	}
+
+	rc := v.(*runningCommand)
+	select {
+	case <-rc.done:
+	case <-ctx.Done():
+		return models.CommandDetail{}, ctx.Err()
+	}
+
+	return c.GetCommand(ctx, sandboxID, cmdID)
+}
+
+// dbCommandToDetail converts a database.Command to models.CommandDetail.
+func (c *Client) dbCommandToDetail(cmd database.Command) models.CommandDetail {
+	var args []string
+	if cmd.Args != "" {
+		json.Unmarshal([]byte(cmd.Args), &args)
+	}
+
+	detail := models.CommandDetail{
+		ID:         cmd.ID,
+		Name:       cmd.Name,
+		Args:       args,
+		Cwd:        cmd.Cwd,
+		SandboxID:  cmd.SandboxID,
+		ExitCode:   cmd.ExitCode,
+		StartedAt:  cmd.StartedAt,
+		FinishedAt: cmd.FinishedAt,
+	}
+
+	// If the command is still running in memory, check live state.
+	if v, ok := c.commands.Load(cmd.ID); ok {
+		rc := v.(*runningCommand)
+		rc.mu.Lock()
+		if rc.finished {
+			ec := rc.exitCode
+			detail.ExitCode = &ec
+		}
+		rc.mu.Unlock()
+	}
+
+	return detail
 }
 
 // ReadFile reads the content of a file inside a sandbox.
 func (c *Client) ReadFile(ctx context.Context, id, path string) (string, error) {
-	result, err := c.Exec(ctx, id, []string{"cat", path})
+	result, err := c.execWithStdin(ctx, id, []string{"cat", path}, nil)
 	if err != nil {
 		return "", err
 	}
-	return result.Stdout, nil
+	return result.stdout, nil
 }
 
 // WriteFile writes content to a file inside a sandbox (creates parent dirs as needed).
 func (c *Client) WriteFile(ctx context.Context, id, path, content string) error {
-	if _, err := c.Exec(ctx, id, []string{"sh", "-c", "mkdir -p $(dirname '" + path + "')"}); err != nil {
+	if _, err := c.execWithStdin(ctx, id, []string{"sh", "-c", "mkdir -p $(dirname '" + path + "')"}, nil); err != nil {
 		return err
 	}
 	_, err := c.execWithStdin(ctx, id, []string{"sh", "-c", "cat > '" + path + "'"}, strings.NewReader(content))
@@ -521,19 +795,17 @@ func (c *Client) WriteFile(ctx context.Context, id, path, content string) error 
 
 // DeleteFile deletes a file or directory inside a sandbox.
 func (c *Client) DeleteFile(ctx context.Context, id, path string) error {
-	if _, err := c.Exec(ctx, id, []string{"rm", "-rf", path}); err != nil {
-		return err
-	}
-	return nil
+	_, err := c.execWithStdin(ctx, id, []string{"rm", "-rf", path}, nil)
+	return err
 }
 
 // ListDir lists the contents of a directory inside a sandbox.
 func (c *Client) ListDir(ctx context.Context, id, path string) (string, error) {
-	result, err := c.Exec(ctx, id, []string{"ls", "-la", path})
+	result, err := c.execWithStdin(ctx, id, []string{"ls", "-la", path}, nil)
 	if err != nil {
 		return "", err
 	}
-	return result.Stdout, nil
+	return result.stdout, nil
 }
 
 // PullImage pulls a Docker image from a registry and waits for completion.
@@ -624,9 +896,16 @@ func (c *Client) ImageExists(ctx context.Context, image string) (bool, error) {
 	return true, nil
 }
 
-// Shutdown cancels all pending timers and stops tracked containers.
+// Shutdown cancels all pending timers, running commands, and stops tracked containers.
 // Called during graceful shutdown to prevent orphaned containers.
 func (c *Client) Shutdown(ctx context.Context) {
+	// Cancel all running commands.
+	c.commands.Range(func(key, value any) bool {
+		rc := value.(*runningCommand)
+		rc.cancel()
+		return true
+	})
+
 	c.timers.Range(func(key, value any) bool {
 		id := key.(string)
 		entry := value.(*timerEntry)
@@ -638,8 +917,15 @@ func (c *Client) Shutdown(ctx context.Context) {
 	})
 }
 
+// execResult holds the output from a synchronous exec (used internally for file operations).
+type execResult struct {
+	stdout   string
+	stderr   string
+	exitCode int
+}
+
 // execWithStdin runs a command with optional stdin, returning separated stdout/stderr and exit code.
-func (c *Client) execWithStdin(ctx context.Context, id string, cmd []string, stdin io.Reader) (models.ExecResult, error) {
+func (c *Client) execWithStdin(ctx context.Context, id string, cmd []string, stdin io.Reader) (execResult, error) {
 	attachStdin := stdin != nil
 	execCfg, err := c.cli.ExecCreate(ctx, id, moby.ExecCreateOptions{
 		AttachStdin:  attachStdin,
@@ -648,37 +934,37 @@ func (c *Client) execWithStdin(ctx context.Context, id string, cmd []string, std
 		Cmd:          cmd,
 	})
 	if err != nil {
-		return models.ExecResult{}, wrapNotFound(err)
+		return execResult{}, wrapNotFound(err)
 	}
 
 	attached, err := c.cli.ExecAttach(ctx, execCfg.ID, moby.ExecAttachOptions{})
 	if err != nil {
-		return models.ExecResult{}, err
+		return execResult{}, err
 	}
 	defer attached.Close()
 
 	if stdin != nil {
 		if _, err := io.Copy(attached.Conn, stdin); err != nil {
-			return models.ExecResult{}, err
+			return execResult{}, err
 		}
 		attached.CloseWrite()
 	}
 
 	var stdout, stderr bytes.Buffer
 	if _, err := stdcopy.StdCopy(&stdout, &stderr, attached.Reader); err != nil && err != io.EOF {
-		return models.ExecResult{}, err
+		return execResult{}, err
 	}
 
 	// Inspect the exec instance to retrieve the exit code.
 	inspect, err := c.cli.ExecInspect(ctx, execCfg.ID, moby.ExecInspectOptions{})
 	if err != nil {
-		return models.ExecResult{}, err
+		return execResult{}, err
 	}
 
-	return models.ExecResult{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		ExitCode: inspect.ExitCode,
+	return execResult{
+		stdout:   stdout.String(),
+		stderr:   stderr.String(),
+		exitCode: inspect.ExitCode,
 	}, nil
 }
 

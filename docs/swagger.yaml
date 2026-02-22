@@ -9,12 +9,49 @@ definitions:
         example: image is required
         type: string
     type: object
-  models.CreateSandboxRequest:
+  models.CommandDetail:
     properties:
-      cmd:
+      args:
+        description: arguments
         items:
           type: string
         type: array
+      cwd:
+        description: working directory
+        type: string
+      exit_code:
+        description: nil while running
+        type: integer
+      finished_at:
+        description: unix milliseconds, nil while running
+        type: integer
+      id:
+        description: cmd_<hex>
+        type: string
+      name:
+        description: executable name
+        type: string
+      sandbox_id:
+        description: parent sandbox container ID
+        type: string
+      started_at:
+        description: unix milliseconds
+        type: integer
+    type: object
+  models.CommandListResponse:
+    properties:
+      commands:
+        items:
+          $ref: '#/definitions/models.CommandDetail'
+        type: array
+    type: object
+  models.CommandResponse:
+    properties:
+      command:
+        $ref: '#/definitions/models.CommandDetail'
+    type: object
+  models.CreateSandboxRequest:
+    properties:
       env:
         items:
           type: string
@@ -48,23 +85,26 @@ definitions:
         description: '"80/tcp": "32768"'
         type: object
     type: object
-  models.ExecRequest:
+  models.ExecCommandRequest:
     properties:
-      cmd:
+      args:
+        description: arguments (e.g. ["install"])
         items:
           type: string
         type: array
+      command:
+        description: executable name (e.g. "npm")
+        type: string
+      cwd:
+        description: working directory
+        type: string
+      env:
+        additionalProperties:
+          type: string
+        description: extra environment variables
+        type: object
     required:
-    - cmd
-    type: object
-  models.ExecResult:
-    properties:
-      exit_code:
-        type: integer
-      stderr:
-        type: string
-      stdout:
-        type: string
+    - command
     type: object
   models.FileListResponse:
     properties:
@@ -122,6 +162,14 @@ definitions:
         type: string
       status:
         type: string
+    type: object
+  models.KillCommandRequest:
+    properties:
+      signal:
+        description: POSIX signal number (15=SIGTERM, 9=SIGKILL)
+        type: integer
+    required:
+    - signal
     type: object
   models.MemoryUsage:
     properties:
@@ -454,12 +502,40 @@ paths:
       summary: Inspect a sandbox
       tags:
       - sandboxes
-  /sandboxes/{id}/exec:
+  /sandboxes/{id}/cmd:
+    get:
+      description: Returns all commands executed in the sandbox.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.CommandListResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List commands
+      tags:
+      - commands
     post:
       consumes:
       - application/json
-      description: Run an arbitrary command inside the sandbox and return separated
-        stdout, stderr, and exit code.
+      description: Execute a command asynchronously inside the sandbox. Returns a
+        command ID immediately. Use ?wait=true to stream ND-JSON until completion.
       parameters:
       - description: Sandbox ID
         in: path
@@ -471,20 +547,28 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/models.ExecRequest'
+          $ref: '#/definitions/models.ExecCommandRequest'
+      - description: Block until command finishes (ND-JSON stream)
+        in: query
+        name: wait
+        type: boolean
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/models.ExecResult'
+            $ref: '#/definitions/models.CommandResponse'
         "400":
           description: Bad Request
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: Conflict
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
         "500":
@@ -495,7 +579,130 @@ paths:
       - ApiKeyAuth: []
       summary: Execute a command
       tags:
-      - sandboxes
+      - commands
+  /sandboxes/{id}/cmd/{cmdId}:
+    get:
+      description: Returns the status of a command. Use ?wait=true to block until
+        the command finishes (ND-JSON stream).
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Command ID
+        in: path
+        name: cmdId
+        required: true
+        type: string
+      - description: Block until command finishes (ND-JSON stream)
+        in: query
+        name: wait
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.CommandResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Get command status
+      tags:
+      - commands
+  /sandboxes/{id}/cmd/{cmdId}/kill:
+    post:
+      consumes:
+      - application/json
+      description: Send a POSIX signal to a running command.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Command ID
+        in: path
+        name: cmdId
+        required: true
+        type: string
+      - description: Signal to send
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/models.KillCommandRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.CommandResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Kill a command
+      tags:
+      - commands
+  /sandboxes/{id}/cmd/{cmdId}/logs:
+    get:
+      description: Stream stdout and stderr of a command as ND-JSON lines.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Command ID
+        in: path
+        name: cmdId
+        required: true
+        type: string
+      produces:
+      - application/x-ndjson
+      responses:
+        "200":
+          description: ND-JSON stream
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Stream command logs
+      tags:
+      - commands
   /sandboxes/{id}/files:
     delete:
       description: Remove a file or directory (recursive) inside the sandbox.
@@ -649,54 +856,6 @@ paths:
       summary: List a directory
       tags:
       - files
-  /sandboxes/{id}/logs:
-    get:
-      description: Returns container logs. Use follow=true for real-time SSE streaming.
-      parameters:
-      - description: Sandbox ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Last N lines (default 100, 0 = all)
-        in: query
-        name: tail
-        type: integer
-      - description: Stream logs in real-time via SSE
-        in: query
-        name: follow
-        type: boolean
-      - description: Include timestamps
-        in: query
-        name: timestamps
-        type: boolean
-      produces:
-      - application/json
-      - text/event-stream
-      responses:
-        "200":
-          description: logs output
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/internal_api.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/internal_api.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/internal_api.ErrorResponse'
-      security:
-      - ApiKeyAuth: []
-      summary: Get container logs
-      tags:
-      - sandboxes
   /sandboxes/{id}/pause:
     post:
       description: Freeze all processes inside the sandbox.

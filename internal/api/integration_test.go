@@ -1,8 +1,10 @@
 package api_test
 
 import (
+	"bufio"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"testing"
 
@@ -33,7 +35,6 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	// 1. Create a sandbox using a lightweight image (assumes nextjs-docker:latest is already available locally).
 	w := do(r, "POST", "/v1/sandboxes", map[string]any{
 		"image":   "nextjs-docker:latest",
-		"cmd":     []string{"sleep", "300"},
 		"timeout": 60,
 	})
 	require.Equal(t, http.StatusCreated, w.Code, "create should return 201: %s", w.Body.String())
@@ -63,52 +64,120 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.True(t, detail.Running)
 	assert.NotNil(t, detail.ExpiresAt, "sandbox should have an expiration time")
 
-	// 4. Exec a command inside the sandbox.
-	w = do(r, "POST", "/v1/sandboxes/"+id+"/exec", map[string]any{
-		"cmd": []string{"echo", "hello"},
+	// 4. Execute a command (async).
+	w = do(r, "POST", "/v1/sandboxes/"+id+"/cmd", map[string]any{
+		"command": "echo",
+		"args":    []string{"hello"},
 	})
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var cmdResp models.CommandResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &cmdResp))
+	assert.NotEmpty(t, cmdResp.Command.ID)
+	assert.Equal(t, "echo", cmdResp.Command.Name)
+	assert.Nil(t, cmdResp.Command.ExitCode, "exit_code should be nil initially")
+	cmdID := cmdResp.Command.ID
+
+	// 5. Wait for command to finish.
+	w = do(r, "GET", "/v1/sandboxes/"+id+"/cmd/"+cmdID+"?wait=true", nil)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Header().Get("Content-Type"), "application/x-ndjson")
+
+	// Parse the ND-JSON stream — should have at least one line with exit_code.
+	scanner := bufio.NewScanner(strings.NewReader(w.Body.String()))
+	var lastCmd models.CommandResponse
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		json.Unmarshal([]byte(line), &lastCmd)
+	}
+	require.NotNil(t, lastCmd.Command.ExitCode, "final status should have exit_code")
+	assert.Equal(t, 0, *lastCmd.Command.ExitCode)
+
+	// 6. List commands — should have 1 entry.
+	w = do(r, "GET", "/v1/sandboxes/"+id+"/cmd", nil)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var listResp models.CommandListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &listResp))
+	assert.GreaterOrEqual(t, len(listResp.Commands), 1)
+
+	// 7. Stream logs — should contain "hello".
+	w = do(r, "GET", "/v1/sandboxes/"+id+"/cmd/"+cmdID+"/logs", nil)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "hello")
 
-	// 5. Write a file.
+	// 8. Execute a long-running command and kill it.
+	w = do(r, "POST", "/v1/sandboxes/"+id+"/cmd", map[string]any{
+		"command": "sleep",
+		"args":    []string{"3600"},
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var sleepResp models.CommandResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &sleepResp))
+	sleepID := sleepResp.Command.ID
+
+	// Kill the command.
+	w = do(r, "POST", "/v1/sandboxes/"+id+"/cmd/"+sleepID+"/kill", map[string]any{"signal": 15})
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Wait and verify it exited with non-zero.
+	w = do(r, "GET", "/v1/sandboxes/"+id+"/cmd/"+sleepID+"?wait=true", nil)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	scanner = bufio.NewScanner(strings.NewReader(w.Body.String()))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		json.Unmarshal([]byte(line), &lastCmd)
+	}
+	require.NotNil(t, lastCmd.Command.ExitCode)
+	assert.NotEqual(t, 0, *lastCmd.Command.ExitCode, "killed command should have non-zero exit code")
+
+	// 9. Write a file.
 	w = do(r, "PUT", "/v1/sandboxes/"+id+"/files?path=/tmp/test.txt", map[string]any{
 		"content": "integration-test",
 	})
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "written")
 
-	// 6. Read the file back.
+	// 10. Read the file back.
 	w = do(r, "GET", "/v1/sandboxes/"+id+"/files?path=/tmp/test.txt", nil)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "integration-test")
 
-	// 7. List directory.
+	// 11. List directory.
 	w = do(r, "GET", "/v1/sandboxes/"+id+"/files/list?path=/tmp", nil)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "test.txt")
 
-	// 8. Delete the file.
+	// 12. Delete the file.
 	w = do(r, "DELETE", "/v1/sandboxes/"+id+"/files?path=/tmp/test.txt", nil)
 	assert.Equal(t, http.StatusNoContent, w.Code)
 
-	// 9. Pause the sandbox.
+	// 13. Pause the sandbox.
 	w = do(r, "POST", "/v1/sandboxes/"+id+"/pause", nil)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "paused")
 
-	// 10. Resume the sandbox.
+	// 14. Resume the sandbox.
 	w = do(r, "POST", "/v1/sandboxes/"+id+"/resume", nil)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "resumed")
 
-	// 11. Renew expiration.
+	// 15. Renew expiration.
 	w = do(r, "POST", "/v1/sandboxes/"+id+"/renew-expiration", map[string]any{
 		"timeout": 120,
 	})
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "renewed")
 
-	// 12. Restart the sandbox — should return new ports and expiration.
+	// 16. Restart the sandbox — should return new ports and expiration.
 	w = do(r, "POST", "/v1/sandboxes/"+id+"/restart", nil)
 	assert.Equal(t, http.StatusOK, w.Code)
 
@@ -118,16 +187,16 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.NotNil(t, restarted.Ports, "restart should return port mappings")
 	assert.NotNil(t, restarted.ExpiresAt, "restart should return expiration time")
 
-	// 13. Stop the sandbox.
+	// 17. Stop the sandbox.
 	w = do(r, "POST", "/v1/sandboxes/"+id+"/stop", nil)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "stopped")
 
-	// 14. Delete the sandbox.
+	// 18. Delete the sandbox.
 	w = do(r, "DELETE", "/v1/sandboxes/"+id, nil)
 	assert.Equal(t, http.StatusNoContent, w.Code)
 
-	// 15. Inspect deleted sandbox should return 404.
+	// 19. Inspect deleted sandbox should return 404.
 	w = do(r, "GET", "/v1/sandboxes/"+id, nil)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
@@ -146,7 +215,7 @@ func TestIntegration_NotFound(t *testing.T) {
 		{"POST", "/v1/sandboxes/nonexistent/pause", nil},
 		{"POST", "/v1/sandboxes/nonexistent/resume", nil},
 		{"POST", "/v1/sandboxes/nonexistent/renew-expiration", map[string]any{"timeout": 60}},
-		{"POST", "/v1/sandboxes/nonexistent/exec", map[string]any{"cmd": []string{"echo"}}},
+		{"POST", "/v1/sandboxes/nonexistent/cmd", map[string]any{"command": "echo"}},
 	}
 
 	for _, e := range endpoints {
@@ -165,7 +234,6 @@ func TestIntegration_DefaultResourceLimits(t *testing.T) {
 	// Create a sandbox without specifying resource limits
 	w := do(r, "POST", "/v1/sandboxes", map[string]any{
 		"image":   "nextjs-docker:latest",
-		"cmd":     []string{"sleep", "60"},
 		"timeout": 60,
 	})
 	require.Equal(t, http.StatusCreated, w.Code, "create should return 201: %s", w.Body.String())
@@ -183,12 +251,12 @@ func TestIntegration_DefaultResourceLimits(t *testing.T) {
 	w = do(r, "GET", "/v1/sandboxes/"+id, nil)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var detail models.SandboxDetail
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &detail))
+	var detailResp models.SandboxDetail
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &detailResp))
 
 	// Verify defaults: 1GB RAM, 1 vCPU
-	assert.Equal(t, int64(1024), detail.Resources.Memory, "Default memory should be 1024 MB")
-	assert.Equal(t, 1.0, detail.Resources.CPUs, "Default CPUs should be 1.0")
+	assert.Equal(t, int64(1024), detailResp.Resources.Memory, "Default memory should be 1024 MB")
+	assert.Equal(t, 1.0, detailResp.Resources.CPUs, "Default CPUs should be 1.0")
 }
 
 func TestIntegration_ImagePull(t *testing.T) {

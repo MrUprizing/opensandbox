@@ -2,12 +2,12 @@ package api
 
 import (
 	"bufio"
-	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
+	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/moby/moby/api/pkg/stdcopy"
 	"open-sandbox/models"
 )
 
@@ -217,36 +217,6 @@ func (h *Handler) deleteSandbox(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// execSandbox handles POST /v1/sandboxes/:id/exec.
-// @Summary      Execute a command
-// @Description  Run an arbitrary command inside the sandbox and return separated stdout, stderr, and exit code.
-// @Tags         sandboxes
-// @Accept       json
-// @Produce      json
-// @Param        id    path      string             true  "Sandbox ID"
-// @Param        body  body      models.ExecRequest  true  "Command to execute"
-// @Success      200   {object}  models.ExecResult
-// @Failure      400   {object}  ErrorResponse
-// @Failure      404   {object}  ErrorResponse
-// @Failure      500   {object}  ErrorResponse
-// @Security     ApiKeyAuth
-// @Router       /sandboxes/{id}/exec [post]
-func (h *Handler) execSandbox(c *gin.Context) {
-	var req models.ExecRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		badRequest(c, err.Error())
-		return
-	}
-
-	result, err := h.docker.Exec(c.Request.Context(), c.Param("id"), req.Cmd)
-	if err != nil {
-		internalError(c, err)
-		return
-	}
-
-	c.JSON(http.StatusOK, result)
-}
-
 // getStats handles GET /v1/sandboxes/:id/stats.
 // @Summary      Get container stats
 // @Description  Returns a snapshot of CPU, memory and process usage for the sandbox.
@@ -268,85 +238,209 @@ func (h *Handler) getStats(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
-// getLogs handles GET /v1/sandboxes/:id/logs.
-// @Summary      Get container logs
-// @Description  Returns container logs. Use follow=true for real-time SSE streaming.
-// @Tags         sandboxes
+// execCommand handles POST /v1/sandboxes/:id/cmd.
+// @Summary      Execute a command
+// @Description  Execute a command asynchronously inside the sandbox. Returns a command ID immediately. Use ?wait=true to stream ND-JSON until completion.
+// @Tags         commands
+// @Accept       json
 // @Produce      json
-// @Produce      text/event-stream
-// @Param        id          path      string  true   "Sandbox ID"
-// @Param        tail        query     int     false  "Last N lines (default 100, 0 = all)"
-// @Param        follow      query     bool    false  "Stream logs in real-time via SSE"
-// @Param        timestamps  query     bool    false  "Include timestamps"
-// @Success      200  {object}  map[string]string  "logs output"
-// @Failure      400  {object}  ErrorResponse
-// @Failure      404  {object}  ErrorResponse
-// @Failure      500  {object}  ErrorResponse
+// @Param        id    path      string                       true  "Sandbox ID"
+// @Param        body  body      models.ExecCommandRequest    true  "Command to execute"
+// @Param        wait  query     bool                         false "Block until command finishes (ND-JSON stream)"
+// @Success      200   {object}  models.CommandResponse
+// @Failure      400   {object}  ErrorResponse
+// @Failure      404   {object}  ErrorResponse
+// @Failure      409   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
 // @Security     ApiKeyAuth
-// @Router       /sandboxes/{id}/logs [get]
-func (h *Handler) getLogs(c *gin.Context) {
-	var opts models.LogsOptions
-	if err := c.ShouldBindQuery(&opts); err != nil {
+// @Router       /sandboxes/{id}/cmd [post]
+func (h *Handler) execCommand(c *gin.Context) {
+	var req models.ExecCommandRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		badRequest(c, err.Error())
 		return
 	}
 
-	if opts.Tail < 0 {
-		badRequest(c, "tail must be >= 0")
-		return
-	}
-
-	rc, err := h.docker.Logs(c.Request.Context(), c.Param("id"), opts)
+	cmd, err := h.docker.ExecCommand(c.Request.Context(), c.Param("id"), req)
 	if err != nil {
 		internalError(c, err)
 		return
 	}
-	defer rc.Close()
 
-	if opts.Follow {
-		h.streamLogsSSE(c, rc)
+	// If ?wait=true, stream ND-JSON until command finishes.
+	if c.Query("wait") == "true" {
+		h.streamWait(c, c.Param("id"), cmd.ID)
 		return
 	}
 
-	// Snapshot mode: demux the multiplexed stream and return as JSON.
-	var buf bytes.Buffer
-	if _, err := stdcopy.StdCopy(&buf, &buf, rc); err != nil {
-		// Fallback: if stdcopy fails (e.g. TTY container), read raw.
-		raw, _ := io.ReadAll(rc)
-		buf.Write(raw)
-	}
-
-	c.JSON(http.StatusOK, gin.H{"logs": buf.String()})
+	c.JSON(http.StatusOK, models.CommandResponse{Command: cmd})
 }
 
-// streamLogsSSE streams container logs as Server-Sent Events.
-func (h *Handler) streamLogsSSE(c *gin.Context, rc io.ReadCloser) {
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
+// listCommands handles GET /v1/sandboxes/:id/cmd.
+// @Summary      List commands
+// @Description  Returns all commands executed in the sandbox.
+// @Tags         commands
+// @Produce      json
+// @Param        id   path      string  true  "Sandbox ID"
+// @Success      200  {object}  models.CommandListResponse
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
+// @Router       /sandboxes/{id}/cmd [get]
+func (h *Handler) listCommands(c *gin.Context) {
+	cmds, err := h.docker.ListCommands(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, models.CommandListResponse{Commands: cmds})
+}
+
+// getCommand handles GET /v1/sandboxes/:id/cmd/:cmdId.
+// @Summary      Get command status
+// @Description  Returns the status of a command. Use ?wait=true to block until the command finishes (ND-JSON stream).
+// @Tags         commands
+// @Produce      json
+// @Param        id      path      string  true  "Sandbox ID"
+// @Param        cmdId   path      string  true  "Command ID"
+// @Param        wait    query     bool    false "Block until command finishes (ND-JSON stream)"
+// @Success      200  {object}  models.CommandResponse
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
+// @Router       /sandboxes/{id}/cmd/{cmdId} [get]
+func (h *Handler) getCommand(c *gin.Context) {
+	cmd, err := h.docker.GetCommand(c.Request.Context(), c.Param("id"), c.Param("cmdId"))
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+
+	// If ?wait=true, block until command finishes.
+	if c.Query("wait") == "true" {
+		h.streamWait(c, c.Param("id"), c.Param("cmdId"))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.CommandResponse{Command: cmd})
+}
+
+// killCommand handles POST /v1/sandboxes/:id/cmd/:cmdId/kill.
+// @Summary      Kill a command
+// @Description  Send a POSIX signal to a running command.
+// @Tags         commands
+// @Accept       json
+// @Produce      json
+// @Param        id      path      string                     true  "Sandbox ID"
+// @Param        cmdId   path      string                     true  "Command ID"
+// @Param        body    body      models.KillCommandRequest  true  "Signal to send"
+// @Success      200  {object}  models.CommandResponse
+// @Failure      400  {object}  ErrorResponse
+// @Failure      404  {object}  ErrorResponse
+// @Failure      409  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
+// @Router       /sandboxes/{id}/cmd/{cmdId}/kill [post]
+func (h *Handler) killCommand(c *gin.Context) {
+	var req models.KillCommandRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		badRequest(c, err.Error())
+		return
+	}
+
+	cmd, err := h.docker.KillCommand(c.Request.Context(), c.Param("id"), c.Param("cmdId"), req.Signal)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, models.CommandResponse{Command: cmd})
+}
+
+// streamCommandLogs handles GET /v1/sandboxes/:id/cmd/:cmdId/logs.
+// @Summary      Stream command logs
+// @Description  Stream stdout and stderr of a command as ND-JSON lines.
+// @Tags         commands
+// @Produce      application/x-ndjson
+// @Param        id      path      string  true  "Sandbox ID"
+// @Param        cmdId   path      string  true  "Command ID"
+// @Success      200  {string}  string  "ND-JSON stream"
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Security     ApiKeyAuth
+// @Router       /sandboxes/{id}/cmd/{cmdId}/logs [get]
+func (h *Handler) streamCommandLogs(c *gin.Context) {
+	stdoutR, stderrR, err := h.docker.StreamCommandLogs(
+		c.Request.Context(), c.Param("id"), c.Param("cmdId"),
+	)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	defer stdoutR.Close()
+	defer stderrR.Close()
+
+	c.Header("Content-Type", "application/x-ndjson")
 	c.Status(http.StatusOK)
-
-	// Demux the multiplexed Docker log stream into plain text.
-	pr, pw := io.Pipe()
-	go func() {
-		defer pw.Close()
-		// StdCopy demultiplexes stdout+stderr into pw.
-		// If the container uses a TTY, this will fail — fallback to raw copy.
-		if _, err := stdcopy.StdCopy(pw, pw, rc); err != nil {
-			io.Copy(pw, rc)
-		}
-	}()
-
 	flusher, _ := c.Writer.(http.Flusher)
-	scanner := bufio.NewScanner(pr)
-	for scanner.Scan() {
+	enc := json.NewEncoder(c.Writer)
+
+	type logLine struct {
+		Type string `json:"type"`
+		Data string `json:"data"`
+	}
+
+	// Read from both streams concurrently, write as ND-JSON.
+	lines := make(chan logLine, 64)
+	readStream := func(r io.ReadCloser, streamType string) {
+		scanner := bufio.NewScanner(r)
+		for scanner.Scan() {
+			lines <- logLine{Type: streamType, Data: scanner.Text() + "\n"}
+		}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); readStream(stdoutR, "stdout") }()
+	go func() { defer wg.Done(); readStream(stderrR, "stderr") }()
+	go func() { wg.Wait(); close(lines) }()
+
+	for line := range lines {
 		if c.IsAborted() {
 			return
 		}
-		c.SSEvent("log", scanner.Text())
+		enc.Encode(line)
 		if flusher != nil {
 			flusher.Flush()
 		}
+	}
+}
+
+// streamWait streams ND-JSON with command status when started and when finished.
+func (h *Handler) streamWait(c *gin.Context, sandboxID, cmdID string) {
+	c.Header("Content-Type", "application/x-ndjson")
+	c.Status(http.StatusOK)
+	flusher, _ := c.Writer.(http.Flusher)
+	enc := json.NewEncoder(c.Writer)
+
+	// Emit initial status.
+	cmd, err := h.docker.GetCommand(c.Request.Context(), sandboxID, cmdID)
+	if err != nil {
+		return
+	}
+	enc.Encode(models.CommandResponse{Command: cmd})
+	if flusher != nil {
+		flusher.Flush()
+	}
+
+	// Wait for completion.
+	cmd, err = h.docker.WaitCommand(c.Request.Context(), sandboxID, cmdID)
+	if err != nil {
+		return
+	}
+	enc.Encode(models.CommandResponse{Command: cmd})
+	if flusher != nil {
+		flusher.Flush()
 	}
 }
 

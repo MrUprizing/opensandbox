@@ -22,3 +22,9 @@ var ErrNotPaused = errors.New("sandbox is not paused")
 
 // ErrNotRunning is returned when trying to exec/pause on a sandbox that is not running.
 var ErrNotRunning = errors.New("sandbox is not running")
+
+// ErrCommandNotFound is returned when a command ID does not exist.
+var ErrCommandNotFound = errors.New("command not found")
+
+// ErrCommandFinished is returned when trying to kill a command that has already exited.
+var ErrCommandFinished = errors.New("command has already finished")

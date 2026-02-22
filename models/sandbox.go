@@ -13,7 +13,6 @@ type CreateSandboxRequest struct {
 	Image     string          `json:"image" binding:"required"`
 	Name      string          `json:"name"`
 	Env       []string        `json:"env"`
-	Cmd       []string        `json:"cmd"`
 	Ports     []string        `json:"ports"`     // container ports to expose: ["80/tcp", "443/tcp"]
 	Timeout   int             `json:"timeout"`   // seconds until auto-stop, 0 = default (900s)
 	Resources *ResourceLimits `json:"resources"` // CPU/memory limits, nil = defaults (1GB RAM, 1 vCPU)
@@ -57,17 +56,39 @@ type RestartResponse struct {
 	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
 }
 
-// ExecRequest is the body for POST /v1/sandboxes/:id/exec
-type ExecRequest struct {
-	Cmd []string `json:"cmd" binding:"required"`
+// ExecCommandRequest is the body for POST /v1/sandboxes/:id/cmd
+type ExecCommandRequest struct {
+	Command string            `json:"command" binding:"required"` // executable name (e.g. "npm")
+	Args    []string          `json:"args"`                       // arguments (e.g. ["install"])
+	Cwd     string            `json:"cwd"`                        // working directory
+	Env     map[string]string `json:"env"`                        // extra environment variables
 }
 
-// ExecResult holds the separated output from a command execution inside a sandbox.
-// Used internally by the Docker client and returned directly by the API.
-type ExecResult struct {
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
-	ExitCode int    `json:"exit_code"`
+// CommandDetail represents a command executed in a sandbox.
+type CommandDetail struct {
+	ID         string   `json:"id"`                    // cmd_<hex>
+	Name       string   `json:"name"`                  // executable name
+	Args       []string `json:"args"`                  // arguments
+	Cwd        string   `json:"cwd"`                   // working directory
+	SandboxID  string   `json:"sandbox_id"`            // parent sandbox container ID
+	ExitCode   *int     `json:"exit_code,omitempty"`   // nil while running
+	StartedAt  int64    `json:"started_at"`            // unix milliseconds
+	FinishedAt *int64   `json:"finished_at,omitempty"` // unix milliseconds, nil while running
+}
+
+// CommandResponse wraps a single command.
+type CommandResponse struct {
+	Command CommandDetail `json:"command"`
+}
+
+// CommandListResponse wraps a list of commands.
+type CommandListResponse struct {
+	Commands []CommandDetail `json:"commands"`
+}
+
+// KillCommandRequest is the body for POST /v1/sandboxes/:id/cmd/:cmdId/kill
+type KillCommandRequest struct {
+	Signal int `json:"signal" binding:"required"` // POSIX signal number (15=SIGTERM, 9=SIGKILL)
 }
 
 // FileReadResponse is the response for GET /v1/sandboxes/:id/files
@@ -107,13 +128,6 @@ type ImagePullRequest struct {
 type ImagePullResponse struct {
 	Status string `json:"status"`
 	Image  string `json:"image"`
-}
-
-// LogsOptions configures container log retrieval.
-type LogsOptions struct {
-	Tail       int  `form:"tail"`       // last N lines (default 100, 0 = all)
-	Follow     bool `form:"follow"`     // stream in real-time via SSE
-	Timestamps bool `form:"timestamps"` // include timestamp per line
 }
 
 // SandboxStats is a curated snapshot of container resource usage.
