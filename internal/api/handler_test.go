@@ -17,34 +17,41 @@ import (
 	"open-sandbox/models"
 )
 
+// Compile-time check that stub implements api.DockerClient.
+var _ api.DockerClient = (*stub)(nil)
+
 func init() { gin.SetMode(gin.TestMode) }
 
 // stub implements api.DockerClient for testing without a real Docker daemon.
 // Each field is an optional function — set only what the test needs, leave the rest nil.
 // If a nil method is called unexpectedly the test will panic, making the gap obvious.
 type stub struct {
-	ping            func() error
-	list            func() ([]models.SandboxSummary, error)
-	create          func(models.CreateSandboxRequest) (models.CreateSandboxResponse, error)
-	inspect         func(string) (models.SandboxDetail, error)
-	start           func(string) (models.RestartResponse, error)
-	stop            func(string) error
-	restart         func(string) (models.RestartResponse, error)
-	remove          func(string) error
-	pause           func(string) error
-	resume          func(string) error
-	renewExpiration func(string, int) error
-	exec            func(string, []string) (models.ExecResult, error)
-	logs            func(string, models.LogsOptions) (io.ReadCloser, error)
-	stats           func(string) (models.SandboxStats, error)
-	readFile        func(string, string) (string, error)
-	writeFile       func(string, string, string) error
-	deleteFile      func(string, string) error
-	listDir         func(string, string) (string, error)
-	pullImage       func(string) error
-	removeImage     func(string, bool) error
-	inspectImage    func(string) (models.ImageDetail, error)
-	listImages      func() ([]models.ImageSummary, error)
+	ping              func() error
+	list              func() ([]models.SandboxSummary, error)
+	create            func(models.CreateSandboxRequest) (models.CreateSandboxResponse, error)
+	inspect           func(string) (models.SandboxDetail, error)
+	start             func(string) (models.RestartResponse, error)
+	stop              func(string) error
+	restart           func(string) (models.RestartResponse, error)
+	remove            func(string) error
+	pause             func(string) error
+	resume            func(string) error
+	renewExpiration   func(string, int) error
+	execCommand       func(string, models.ExecCommandRequest) (models.CommandDetail, error)
+	getCommand        func(string, string) (models.CommandDetail, error)
+	listCommands      func(string) ([]models.CommandDetail, error)
+	killCommand       func(string, string, int) (models.CommandDetail, error)
+	streamCommandLogs func(string, string) (io.ReadCloser, io.ReadCloser, error)
+	waitCommand       func(string, string) (models.CommandDetail, error)
+	stats             func(string) (models.SandboxStats, error)
+	readFile          func(string, string) (string, error)
+	writeFile         func(string, string, string) error
+	deleteFile        func(string, string) error
+	listDir           func(string, string) (string, error)
+	pullImage         func(string) error
+	removeImage       func(string, bool) error
+	inspectImage      func(string) (models.ImageDetail, error)
+	listImages        func() ([]models.ImageSummary, error)
 }
 
 func (s *stub) Ping(_ context.Context) error {
@@ -78,17 +85,41 @@ func (s *stub) Resume(_ context.Context, id string) error { return s.resume(id) 
 func (s *stub) RenewExpiration(_ context.Context, id string, timeout int) error {
 	return s.renewExpiration(id, timeout)
 }
-func (s *stub) Exec(_ context.Context, id string, cmd []string) (models.ExecResult, error) {
-	if s.exec != nil {
-		return s.exec(id, cmd)
+func (s *stub) ExecCommand(_ context.Context, sandboxID string, req models.ExecCommandRequest) (models.CommandDetail, error) {
+	if s.execCommand != nil {
+		return s.execCommand(sandboxID, req)
 	}
-	return models.ExecResult{}, nil
+	return models.CommandDetail{}, nil
 }
-func (s *stub) Logs(_ context.Context, id string, opts models.LogsOptions) (io.ReadCloser, error) {
-	if s.logs != nil {
-		return s.logs(id, opts)
+func (s *stub) GetCommand(_ context.Context, sandboxID, cmdID string) (models.CommandDetail, error) {
+	if s.getCommand != nil {
+		return s.getCommand(sandboxID, cmdID)
 	}
-	return io.NopCloser(bytes.NewReader(nil)), nil
+	return models.CommandDetail{}, nil
+}
+func (s *stub) ListCommands(_ context.Context, sandboxID string) ([]models.CommandDetail, error) {
+	if s.listCommands != nil {
+		return s.listCommands(sandboxID)
+	}
+	return []models.CommandDetail{}, nil
+}
+func (s *stub) KillCommand(_ context.Context, sandboxID, cmdID string, signal int) (models.CommandDetail, error) {
+	if s.killCommand != nil {
+		return s.killCommand(sandboxID, cmdID, signal)
+	}
+	return models.CommandDetail{}, nil
+}
+func (s *stub) StreamCommandLogs(_ context.Context, sandboxID, cmdID string) (io.ReadCloser, io.ReadCloser, error) {
+	if s.streamCommandLogs != nil {
+		return s.streamCommandLogs(sandboxID, cmdID)
+	}
+	return io.NopCloser(bytes.NewReader(nil)), io.NopCloser(bytes.NewReader(nil)), nil
+}
+func (s *stub) WaitCommand(_ context.Context, sandboxID, cmdID string) (models.CommandDetail, error) {
+	if s.waitCommand != nil {
+		return s.waitCommand(sandboxID, cmdID)
+	}
+	return models.CommandDetail{}, nil
 }
 func (s *stub) Stats(_ context.Context, id string) (models.SandboxStats, error) {
 	if s.stats != nil {
@@ -304,62 +335,187 @@ func TestRestartSandbox_NotFound(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "NOT_FOUND")
 }
 
-func TestExecSandbox(t *testing.T) {
+// ── Command Tests ───────────────────────────────────────────────────────────
+
+func TestExecCommand_OK(t *testing.T) {
 	r := newRouter(&stub{
-		exec: func(id string, cmd []string) (models.ExecResult, error) {
-			return models.ExecResult{
-				Stdout:   "src\npackage.json\n",
-				Stderr:   "",
-				ExitCode: 0,
+		execCommand: func(sandboxID string, req models.ExecCommandRequest) (models.CommandDetail, error) {
+			return models.CommandDetail{
+				ID:        "cmd_abc123",
+				Name:      req.Command,
+				Args:      req.Args,
+				Cwd:       req.Cwd,
+				SandboxID: sandboxID,
+				StartedAt: 1750344501629,
 			}, nil
 		},
 	})
 
-	w := do(r, "POST", "/v1/sandboxes/abc123/exec", map[string]any{"cmd": []string{"ls", "/app"}})
+	w := do(r, "POST", "/v1/sandboxes/abc123/cmd", map[string]any{
+		"command": "npm",
+		"args":    []string{"install"},
+		"cwd":     "/app",
+	})
 	assert.Equal(t, 200, w.Code)
 	body := w.Body.String()
-	assert.Contains(t, body, "src")
-	assert.Contains(t, body, `"stdout"`)
-	assert.Contains(t, body, `"stderr"`)
-	assert.Contains(t, body, `"exit_code"`)
+	assert.Contains(t, body, "cmd_abc123")
+	assert.Contains(t, body, "npm")
+	assert.Contains(t, body, `"command"`)
+	// exit_code should not be present (omitempty)
+	assert.NotContains(t, body, "exit_code")
 }
 
-func TestExecSandbox_WithStderr(t *testing.T) {
+func TestExecCommand_MissingCommand(t *testing.T) {
+	r := newRouter(&stub{})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/cmd", map[string]any{})
+	assert.Equal(t, 400, w.Code)
+	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+}
+
+func TestExecCommand_SandboxNotRunning(t *testing.T) {
 	r := newRouter(&stub{
-		exec: func(id string, cmd []string) (models.ExecResult, error) {
-			return models.ExecResult{
-				Stdout:   "",
-				Stderr:   "command not found\n",
-				ExitCode: 127,
-			}, nil
+		execCommand: func(string, models.ExecCommandRequest) (models.CommandDetail, error) {
+			return models.CommandDetail{}, docker.ErrNotRunning
 		},
 	})
 
-	w := do(r, "POST", "/v1/sandboxes/abc123/exec", map[string]any{"cmd": []string{"nonexistent"}})
-	assert.Equal(t, 200, w.Code)
-	body := w.Body.String()
-	assert.Contains(t, body, "command not found")
-	assert.Contains(t, body, "127")
-}
-
-func TestExecSandbox_NotRunning(t *testing.T) {
-	r := newRouter(&stub{
-		exec: func(id string, cmd []string) (models.ExecResult, error) {
-			return models.ExecResult{}, docker.ErrNotRunning
-		},
-	})
-
-	w := do(r, "POST", "/v1/sandboxes/abc123/exec", map[string]any{"cmd": []string{"echo", "hi"}})
+	w := do(r, "POST", "/v1/sandboxes/abc123/cmd", map[string]any{"command": "echo"})
 	assert.Equal(t, 409, w.Code)
 	assert.Contains(t, w.Body.String(), "CONFLICT")
 }
 
-func TestExecSandbox_MissingCmd(t *testing.T) {
+func TestExecCommand_SandboxNotFound(t *testing.T) {
+	r := newRouter(&stub{
+		execCommand: func(string, models.ExecCommandRequest) (models.CommandDetail, error) {
+			return models.CommandDetail{}, docker.ErrNotFound
+		},
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/nope/cmd", map[string]any{"command": "echo"})
+	assert.Equal(t, 404, w.Code)
+	assert.Contains(t, w.Body.String(), "NOT_FOUND")
+}
+
+func TestListCommands_OK(t *testing.T) {
+	r := newRouter(&stub{
+		listCommands: func(sandboxID string) ([]models.CommandDetail, error) {
+			ec := 0
+			return []models.CommandDetail{
+				{ID: "cmd_1", Name: "echo", SandboxID: sandboxID, ExitCode: &ec, StartedAt: 1000},
+				{ID: "cmd_2", Name: "npm", SandboxID: sandboxID, StartedAt: 2000},
+			}, nil
+		},
+	})
+
+	w := do(r, "GET", "/v1/sandboxes/abc123/cmd", nil)
+	assert.Equal(t, 200, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, "cmd_1")
+	assert.Contains(t, body, "cmd_2")
+	assert.Contains(t, body, `"commands"`)
+}
+
+func TestListCommands_Empty(t *testing.T) {
+	r := newRouter(&stub{
+		listCommands: func(string) ([]models.CommandDetail, error) {
+			return []models.CommandDetail{}, nil
+		},
+	})
+
+	w := do(r, "GET", "/v1/sandboxes/abc123/cmd", nil)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), `"commands":[]`)
+}
+
+func TestGetCommand_OK(t *testing.T) {
+	ec := 0
+	r := newRouter(&stub{
+		getCommand: func(sandboxID, cmdID string) (models.CommandDetail, error) {
+			return models.CommandDetail{
+				ID:        cmdID,
+				Name:      "echo",
+				SandboxID: sandboxID,
+				ExitCode:  &ec,
+				StartedAt: 1000,
+			}, nil
+		},
+	})
+
+	w := do(r, "GET", "/v1/sandboxes/abc123/cmd/cmd_xyz", nil)
+	assert.Equal(t, 200, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, "cmd_xyz")
+	assert.Contains(t, body, `"exit_code"`)
+}
+
+func TestGetCommand_NotFound(t *testing.T) {
+	r := newRouter(&stub{
+		getCommand: func(string, string) (models.CommandDetail, error) {
+			return models.CommandDetail{}, docker.ErrCommandNotFound
+		},
+	})
+
+	w := do(r, "GET", "/v1/sandboxes/abc123/cmd/nope", nil)
+	assert.Equal(t, 404, w.Code)
+	assert.Contains(t, w.Body.String(), "NOT_FOUND")
+}
+
+func TestKillCommand_OK(t *testing.T) {
+	ec := 137
+	r := newRouter(&stub{
+		killCommand: func(sandboxID, cmdID string, signal int) (models.CommandDetail, error) {
+			assert.Equal(t, 15, signal)
+			return models.CommandDetail{
+				ID:        cmdID,
+				Name:      "sleep",
+				SandboxID: sandboxID,
+				ExitCode:  &ec,
+				StartedAt: 1000,
+			}, nil
+		},
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/cmd/cmd_xyz/kill", map[string]any{"signal": 15})
+	assert.Equal(t, 200, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, "cmd_xyz")
+	assert.Contains(t, body, "137")
+}
+
+func TestKillCommand_AlreadyFinished(t *testing.T) {
+	r := newRouter(&stub{
+		killCommand: func(string, string, int) (models.CommandDetail, error) {
+			return models.CommandDetail{}, docker.ErrCommandFinished
+		},
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/cmd/cmd_xyz/kill", map[string]any{"signal": 9})
+	assert.Equal(t, 409, w.Code)
+	assert.Contains(t, w.Body.String(), "CONFLICT")
+}
+
+func TestKillCommand_NotFound(t *testing.T) {
+	r := newRouter(&stub{
+		killCommand: func(string, string, int) (models.CommandDetail, error) {
+			return models.CommandDetail{}, docker.ErrCommandNotFound
+		},
+	})
+
+	w := do(r, "POST", "/v1/sandboxes/abc123/cmd/nope/kill", map[string]any{"signal": 9})
+	assert.Equal(t, 404, w.Code)
+	assert.Contains(t, w.Body.String(), "NOT_FOUND")
+}
+
+func TestKillCommand_MissingSignal(t *testing.T) {
 	r := newRouter(&stub{})
 
-	w := do(r, "POST", "/v1/sandboxes/abc123/exec", map[string]any{})
+	w := do(r, "POST", "/v1/sandboxes/abc123/cmd/cmd_xyz/kill", map[string]any{})
 	assert.Equal(t, 400, w.Code)
+	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
 }
+
+// ── File Tests ──────────────────────────────────────────────────────────────
 
 func TestReadFile(t *testing.T) {
 	r := newRouter(&stub{
@@ -754,111 +910,6 @@ func TestCreateSandbox_ImageNotFound(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
 	assert.Contains(t, w.Body.String(), "image not found locally")
 	assert.Contains(t, w.Body.String(), "/v1/images/pull")
-}
-
-// ── Logs Tests ──────────────────────────────────────────────────────────────
-
-// muxFrame builds a Docker multiplexed log frame (8-byte header + payload).
-func muxFrame(streamType byte, data string) []byte {
-	payload := []byte(data)
-	frame := make([]byte, 8+len(payload))
-	frame[0] = streamType
-	frame[4] = byte(len(payload) >> 24)
-	frame[5] = byte(len(payload) >> 16)
-	frame[6] = byte(len(payload) >> 8)
-	frame[7] = byte(len(payload))
-	copy(frame[8:], payload)
-	return frame
-}
-
-func TestGetLogs_Snapshot(t *testing.T) {
-	// Build a multiplexed stream with stdout frames.
-	var buf bytes.Buffer
-	buf.Write(muxFrame(1, "line one\n"))
-	buf.Write(muxFrame(1, "line two\n"))
-	data := buf.Bytes()
-
-	r := newRouter(&stub{
-		logs: func(id string, opts models.LogsOptions) (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(data)), nil
-		},
-	})
-
-	w := do(r, "GET", "/v1/sandboxes/abc123/logs", nil)
-	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Body.String(), "line one")
-	assert.Contains(t, w.Body.String(), "line two")
-}
-
-func TestGetLogs_NotFound(t *testing.T) {
-	r := newRouter(&stub{
-		logs: func(string, models.LogsOptions) (io.ReadCloser, error) {
-			return nil, docker.ErrNotFound
-		},
-	})
-
-	w := do(r, "GET", "/v1/sandboxes/nope/logs", nil)
-	assert.Equal(t, 404, w.Code)
-	assert.Contains(t, w.Body.String(), "NOT_FOUND")
-}
-
-func TestGetLogs_DefaultTail(t *testing.T) {
-	var capturedOpts models.LogsOptions
-	r := newRouter(&stub{
-		logs: func(id string, opts models.LogsOptions) (io.ReadCloser, error) {
-			capturedOpts = opts
-			return io.NopCloser(bytes.NewReader(nil)), nil
-		},
-	})
-
-	do(r, "GET", "/v1/sandboxes/abc123/logs", nil)
-	// Default tail is 0 (Go zero value) — the Docker client defaults to "100".
-	assert.Equal(t, 0, capturedOpts.Tail)
-	assert.False(t, capturedOpts.Follow)
-	assert.False(t, capturedOpts.Timestamps)
-}
-
-func TestGetLogs_CustomTail(t *testing.T) {
-	var capturedOpts models.LogsOptions
-	r := newRouter(&stub{
-		logs: func(id string, opts models.LogsOptions) (io.ReadCloser, error) {
-			capturedOpts = opts
-			return io.NopCloser(bytes.NewReader(nil)), nil
-		},
-	})
-
-	do(r, "GET", "/v1/sandboxes/abc123/logs?tail=50&timestamps=true", nil)
-	assert.Equal(t, 50, capturedOpts.Tail)
-	assert.True(t, capturedOpts.Timestamps)
-}
-
-func TestGetLogs_Follow_SSE(t *testing.T) {
-	// Create a stream that sends a few lines then closes.
-	var buf bytes.Buffer
-	buf.Write(muxFrame(1, "log line 1\n"))
-	buf.Write(muxFrame(1, "log line 2\n"))
-	data := buf.Bytes()
-
-	r := newRouter(&stub{
-		logs: func(id string, opts models.LogsOptions) (io.ReadCloser, error) {
-			assert.True(t, opts.Follow)
-			return io.NopCloser(bytes.NewReader(data)), nil
-		},
-	})
-
-	w := do(r, "GET", "/v1/sandboxes/abc123/logs?follow=true", nil)
-	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Header().Get("Content-Type"), "text/event-stream")
-	assert.Contains(t, w.Body.String(), "log line 1")
-	assert.Contains(t, w.Body.String(), "log line 2")
-}
-
-func TestGetLogs_NegativeTail(t *testing.T) {
-	r := newRouter(&stub{})
-
-	w := do(r, "GET", "/v1/sandboxes/abc123/logs?tail=-5", nil)
-	assert.Equal(t, 400, w.Code)
-	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
 }
 
 // ── Stats Tests ─────────────────────────────────────────────────────────────

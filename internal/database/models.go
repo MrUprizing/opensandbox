@@ -41,3 +41,15 @@ type Sandbox struct {
 	Image string
 	Ports JSONMap `gorm:"type:json"` // e.g. {"80/tcp": "32768"}
 }
+
+// Command persists an executed command's metadata and result.
+type Command struct {
+	ID         string `gorm:"primaryKey"` // cmd_<hex>
+	SandboxID  string `gorm:"index"`      // container ID
+	Name       string // executable name
+	Args       string `gorm:"type:json"` // JSON-encoded []string
+	Cwd        string // working directory
+	ExitCode   *int   // nil while running
+	StartedAt  int64  // unix milliseconds
+	FinishedAt *int64 // unix milliseconds
+}
