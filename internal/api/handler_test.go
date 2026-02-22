@@ -246,7 +246,7 @@ func TestCreateSandbox(t *testing.T) {
 func TestCreateSandbox_MissingImage(t *testing.T) {
 	r := newRouter(&stub{})
 
-	w := do(r, "POST", "/v1/sandboxes", map[string]any{"port": "3000"})
+	w := do(r, "POST", "/v1/sandboxes", map[string]any{"ports": []string{"3000"}})
 	assert.Equal(t, 400, w.Code)
 	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
 }

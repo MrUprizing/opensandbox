@@ -1358,17 +1358,26 @@ const docTemplate = `{
             ],
             "properties": {
                 "env": {
+                    "description": "extra environment variables (e.g. [\"KEY=VALUE\"])",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
                 "image": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "node:22"
                 },
-                "port": {
-                    "description": "container port to expose, e.g. \"3000/tcp\"",
-                    "type": "string"
+                "ports": {
+                    "description": "container ports to expose, e.g. [\"3000\", \"8080/tcp\"]. First port is the default for proxy routing.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "3000",
+                        "8080"
+                    ]
                 },
                 "resources": {
                     "description": "CPU/memory limits, nil = defaults (1GB RAM, 1 vCPU)",
@@ -1380,7 +1389,8 @@ const docTemplate = `{
                 },
                 "timeout": {
                     "description": "seconds until auto-stop, 0 = default (900s)",
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 900
                 }
             }
         },
@@ -1418,15 +1428,20 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "example": [
+                        "install"
+                    ]
                 },
                 "command": {
                     "description": "executable name (e.g. \"npm\")",
-                    "type": "string"
+                    "type": "string",
+                    "example": "npm"
                 },
                 "cwd": {
                     "description": "working directory",
-                    "type": "string"
+                    "type": "string",
+                    "example": "/app"
                 },
                 "env": {
                     "description": "extra environment variables",
@@ -1466,7 +1481,8 @@ const docTemplate = `{
             ],
             "properties": {
                 "content": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "console.log('hello')"
                 }
             }
         },
@@ -1508,7 +1524,8 @@ const docTemplate = `{
             "properties": {
                 "image": {
                     "description": "image name with optional tag (e.g. \"nginx:latest\")",
-                    "type": "string"
+                    "type": "string",
+                    "example": "node:22"
                 }
             }
         },
@@ -1531,7 +1548,8 @@ const docTemplate = `{
             "properties": {
                 "signal": {
                     "description": "POSIX signal number (15=SIGTERM, 9=SIGKILL)",
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 15
                 }
             }
         },
@@ -1560,7 +1578,8 @@ const docTemplate = `{
             "properties": {
                 "timeout": {
                     "description": "new TTL in seconds",
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 900
                 }
             }
         },
@@ -1580,11 +1599,13 @@ const docTemplate = `{
             "properties": {
                 "cpus": {
                     "description": "fractional CPU limit (e.g. 1.5). Default: 1.0, Max: 4.0",
-                    "type": "number"
+                    "type": "number",
+                    "example": 1
                 },
                 "memory": {
                     "description": "memory limit in MB (e.g. 512 = 512MB). Default: 1024 (1GB), Max: 8192 (8GB)",
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 1024
                 }
             }
         },

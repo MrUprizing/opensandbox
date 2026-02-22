@@ -201,13 +201,17 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 		return models.CreateSandboxResponse{}, ErrImageNotFound
 	}
 
-	port := normalizePort(req.Port)
+	ports := normalizePorts(req.Ports)
+	mainPort := ""
+	if len(ports) > 0 {
+		mainPort = ports[0]
+	}
 
 	cfg := &container.Config{
 		Image:        req.Image,
 		Env:          req.Env,
 		Cmd:          []string{"sleep", "infinity"},
-		ExposedPorts: buildExposedPort(port),
+		ExposedPorts: buildExposedPorts(ports),
 	}
 
 	hostCfg := &container.HostConfig{PublishAllPorts: true}
@@ -260,15 +264,15 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 		return models.CreateSandboxResponse{}, err
 	}
 
-	ports := extractPorts(info.Container.NetworkSettings.Ports)
+	assignedPorts := extractPorts(info.Container.NetworkSettings.Ports)
 
 	// Persist sandbox (fire-and-forget: log errors, don't block).
 	if err := c.repo.Save(database.Sandbox{
 		ID:    result.ID,
 		Name:  name,
 		Image: req.Image,
-		Ports: database.JSONMap(ports),
-		Port:  port,
+		Ports: database.JSONMap(assignedPorts),
+		Port:  mainPort,
 	}); err != nil {
 		log.Printf("database: failed to persist sandbox %s: %v", result.ID, err)
 	}
@@ -276,7 +280,7 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 	return models.CreateSandboxResponse{
 		ID:    result.ID,
 		Name:  name,
-		Ports: ports,
+		Ports: assignedPorts,
 	}, nil
 }
 
@@ -1065,16 +1069,34 @@ func normalizePort(port string) string {
 	return port
 }
 
-// buildExposedPort converts a single port spec like "3000/tcp" to network.PortSet.
-func buildExposedPort(port string) network.PortSet {
-	if port == "" {
+// normalizePorts normalizes a slice of port specs.
+func normalizePorts(ports []string) []string {
+	out := make([]string, 0, len(ports))
+	for _, p := range ports {
+		if n := normalizePort(p); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// buildExposedPorts converts a slice of port specs to network.PortSet.
+func buildExposedPorts(ports []string) network.PortSet {
+	if len(ports) == 0 {
 		return nil
 	}
-	parsed, err := network.ParsePort(port)
-	if err != nil {
+	ps := make(network.PortSet)
+	for _, p := range ports {
+		parsed, err := network.ParsePort(p)
+		if err != nil {
+			continue
+		}
+		ps[parsed] = struct{}{}
+	}
+	if len(ps) == 0 {
 		return nil
 	}
-	return network.PortSet{parsed: struct{}{}}
+	return ps
 }
 
 // extractPorts converts network.PortMap to map["80/tcp"]"32768".

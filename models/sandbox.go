@@ -4,17 +4,17 @@ import "time"
 
 // ResourceLimits defines CPU and memory constraints for a sandbox.
 type ResourceLimits struct {
-	Memory int64   `json:"memory"` // memory limit in MB (e.g. 512 = 512MB). Default: 1024 (1GB), Max: 8192 (8GB)
-	CPUs   float64 `json:"cpus"`   // fractional CPU limit (e.g. 1.5). Default: 1.0, Max: 4.0
+	Memory int64   `json:"memory" example:"1024"` // memory limit in MB (e.g. 512 = 512MB). Default: 1024 (1GB), Max: 8192 (8GB)
+	CPUs   float64 `json:"cpus" example:"1.0"`    // fractional CPU limit (e.g. 1.5). Default: 1.0, Max: 4.0
 }
 
 // CreateSandboxRequest is the body for POST /v1/sandboxes
 type CreateSandboxRequest struct {
-	Image     string          `json:"image" binding:"required"`
-	Env       []string        `json:"env"`
-	Port      string          `json:"port"`      // container port to expose, e.g. "3000/tcp"
-	Timeout   int             `json:"timeout"`   // seconds until auto-stop, 0 = default (900s)
-	Resources *ResourceLimits `json:"resources"` // CPU/memory limits, nil = defaults (1GB RAM, 1 vCPU)
+	Image     string          `json:"image" binding:"required" example:"node:24"`
+	Ports     []string        `json:"ports" example:"3000,8080"` // container ports to expose, e.g. ["3000", "8080/tcp"]. First port is the default for proxy routing.
+	Timeout   int             `json:"timeout" example:"900"`     // seconds until auto-stop, 0 = default (900s)
+	Resources *ResourceLimits `json:"resources"`                 // CPU/memory limits, nil = defaults (1GB RAM, 1 vCPU)
+	Env       []string        `json:"env"`                       // extra environment variables (e.g. ["KEY=VALUE"])
 }
 
 // CreateSandboxResponse is the response for POST /v1/sandboxes
@@ -61,10 +61,10 @@ type RestartResponse struct {
 
 // ExecCommandRequest is the body for POST /v1/sandboxes/:id/cmd
 type ExecCommandRequest struct {
-	Command string            `json:"command" binding:"required"` // executable name (e.g. "npm")
-	Args    []string          `json:"args"`                       // arguments (e.g. ["install"])
-	Cwd     string            `json:"cwd"`                        // working directory
-	Env     map[string]string `json:"env"`                        // extra environment variables
+	Command string            `json:"command" binding:"required" example:"npm"` // executable name (e.g. "npm")
+	Args    []string          `json:"args" example:"install"`                   // arguments (e.g. ["install"])
+	Cwd     string            `json:"cwd" example:"/app"`                       // working directory
+	Env     map[string]string `json:"env"`                                      // extra environment variables
 }
 
 // CommandDetail represents a command executed in a sandbox.
@@ -91,7 +91,7 @@ type CommandListResponse struct {
 
 // KillCommandRequest is the body for POST /v1/sandboxes/:id/cmd/:cmdId/kill
 type KillCommandRequest struct {
-	Signal int `json:"signal" binding:"required"` // POSIX signal number (15=SIGTERM, 9=SIGKILL)
+	Signal int `json:"signal" binding:"required" example:"15"` // POSIX signal number (15=SIGTERM, 9=SIGKILL)
 }
 
 // FileReadResponse is the response for GET /v1/sandboxes/:id/files
@@ -102,7 +102,7 @@ type FileReadResponse struct {
 
 // FileWriteRequest is the body for PUT /v1/sandboxes/:id/files
 type FileWriteRequest struct {
-	Content string `json:"content" binding:"required"`
+	Content string `json:"content" binding:"required" example:"console.log('hello')"`
 }
 
 // FileListResponse is the response for GET /v1/sandboxes/:id/files/list
@@ -113,7 +113,7 @@ type FileListResponse struct {
 
 // RenewExpirationRequest is the body for POST /v1/sandboxes/:id/renew-expiration
 type RenewExpirationRequest struct {
-	Timeout int `json:"timeout" binding:"required"` // new TTL in seconds
+	Timeout int `json:"timeout" binding:"required" example:"900"` // new TTL in seconds
 }
 
 // RenewExpirationResponse is the response for POST /v1/sandboxes/:id/renew-expiration
@@ -124,7 +124,7 @@ type RenewExpirationResponse struct {
 
 // ImagePullRequest is the body for POST /v1/images/pull
 type ImagePullRequest struct {
-	Image string `json:"image" binding:"required"` // image name with optional tag (e.g. "nginx:latest")
+	Image string `json:"image" binding:"required" example:"node:22"` // image name with optional tag (e.g. "nginx:latest")
 }
 
 // ImagePullResponse is the response for POST /v1/images/pull

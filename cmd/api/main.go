@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -39,20 +40,23 @@ func main() {
 	repo := database.NewRepository(db)
 	dc := docker.New(repo)
 
-	// --- Reverse proxy ---
+	// --- Reverse proxy (multi-listen) ---
 	proxyServer := proxy.New(cfg.BaseDomain, repo)
 	dc.SetCacheInvalidator(proxyServer.InvalidateCache)
+	proxyHandler := proxyServer.Handler()
 
-	proxySrv := &http.Server{
-		Addr:    cfg.ProxyAddr,
-		Handler: proxyServer.Handler(),
+	var proxySrvs []*http.Server
+	for _, addr := range cfg.ProxyAddrs {
+		srv := &http.Server{Addr: addr, Handler: proxyHandler}
+		proxySrvs = append(proxySrvs, srv)
+		go func(a string) {
+			log.Printf("proxy listening on %s (domain: *.%s)", a, cfg.BaseDomain)
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("proxy listen %s: %v", a, err)
+			}
+		}(addr)
 	}
-	go func() {
-		log.Printf("proxy listening on %s (domain: *.%s)", cfg.ProxyAddr, cfg.BaseDomain)
-		if err := proxySrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("proxy listen: %v", err)
-		}
-	}()
+	log.Printf("proxy URLs via %s", strings.Join(cfg.ProxyAddrs, ", "))
 
 	// --- API server ---
 	r := gin.New()
@@ -63,7 +67,7 @@ func main() {
 		v1.Use(api.APIKeyAuth(cfg.APIKey))
 	}
 
-	h := api.New(dc, cfg.BaseDomain, cfg.ProxyAddr)
+	h := api.New(dc, cfg.BaseDomain, cfg.PrimaryProxyAddr())
 	h.RegisterHealthCheck(r)
 	h.RegisterRoutes(v1)
 
@@ -96,8 +100,10 @@ func main() {
 	defer cancel()
 
 	dc.Shutdown(shutdownCtx)
-	if err := proxySrv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("proxy shutdown: %v", err)
+	for _, ps := range proxySrvs {
+		if err := ps.Shutdown(shutdownCtx); err != nil {
+			log.Printf("proxy shutdown %s: %v", ps.Addr, err)
+		}
 	}
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("api shutdown: %v", err)

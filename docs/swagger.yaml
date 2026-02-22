@@ -53,20 +53,29 @@ definitions:
   models.CreateSandboxRequest:
     properties:
       env:
+        description: extra environment variables (e.g. ["KEY=VALUE"])
         items:
           type: string
         type: array
       image:
+        example: node:22
         type: string
-      port:
-        description: container port to expose, e.g. "3000/tcp"
-        type: string
+      ports:
+        description: container ports to expose, e.g. ["3000", "8080/tcp"]. First port
+          is the default for proxy routing.
+        example:
+        - "3000"
+        - "8080"
+        items:
+          type: string
+        type: array
       resources:
         allOf:
         - $ref: '#/definitions/models.ResourceLimits'
         description: CPU/memory limits, nil = defaults (1GB RAM, 1 vCPU)
       timeout:
         description: seconds until auto-stop, 0 = default (900s)
+        example: 900
         type: integer
     required:
     - image
@@ -91,14 +100,18 @@ definitions:
     properties:
       args:
         description: arguments (e.g. ["install"])
+        example:
+        - install
         items:
           type: string
         type: array
       command:
         description: executable name (e.g. "npm")
+        example: npm
         type: string
       cwd:
         description: working directory
+        example: /app
         type: string
       env:
         additionalProperties:
@@ -125,6 +138,7 @@ definitions:
   models.FileWriteRequest:
     properties:
       content:
+        example: console.log('hello')
         type: string
     required:
     - content
@@ -154,6 +168,7 @@ definitions:
     properties:
       image:
         description: image name with optional tag (e.g. "nginx:latest")
+        example: node:22
         type: string
     required:
     - image
@@ -169,6 +184,7 @@ definitions:
     properties:
       signal:
         description: POSIX signal number (15=SIGTERM, 9=SIGKILL)
+        example: 15
         type: integer
     required:
     - signal
@@ -189,6 +205,7 @@ definitions:
     properties:
       timeout:
         description: new TTL in seconds
+        example: 900
         type: integer
     required:
     - timeout
@@ -204,10 +221,12 @@ definitions:
     properties:
       cpus:
         description: 'fractional CPU limit (e.g. 1.5). Default: 1.0, Max: 4.0'
+        example: 1
         type: number
       memory:
         description: 'memory limit in MB (e.g. 512 = 512MB). Default: 1024 (1GB),
           Max: 8192 (8GB)'
+        example: 1024
         type: integer
     type: object
   models.RestartResponse:
