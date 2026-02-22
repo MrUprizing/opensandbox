@@ -165,7 +165,7 @@ func (s *stub) ListImages(_ context.Context) ([]models.ImageSummary, error) {
 // newRouter builds a Gin engine with all sandbox routes registered for the given client.
 func newRouter(d api.DockerClient) *gin.Engine {
 	r := gin.New()
-	h := api.New(d)
+	h := api.New(d, "localhost", ":3000")
 	h.RegisterHealthCheck(r)
 	h.RegisterRoutes(r.Group("/v1"))
 	return r
@@ -174,7 +174,7 @@ func newRouter(d api.DockerClient) *gin.Engine {
 // newAuthRouter builds a Gin engine with API key auth enabled on /v1.
 func newAuthRouter(d api.DockerClient, key string) *gin.Engine {
 	r := gin.New()
-	h := api.New(d)
+	h := api.New(d, "localhost", ":3000")
 	h.RegisterHealthCheck(r)
 	v1 := r.Group("/v1")
 	v1.Use(api.APIKeyAuth(key))

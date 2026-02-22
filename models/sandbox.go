@@ -13,7 +13,7 @@ type CreateSandboxRequest struct {
 	Image     string          `json:"image" binding:"required"`
 	Name      string          `json:"name"`
 	Env       []string        `json:"env"`
-	Ports     []string        `json:"ports"`     // container ports to expose: ["80/tcp", "443/tcp"]
+	Port      string          `json:"port"`      // container port to expose, e.g. "3000/tcp"
 	Timeout   int             `json:"timeout"`   // seconds until auto-stop, 0 = default (900s)
 	Resources *ResourceLimits `json:"resources"` // CPU/memory limits, nil = defaults (1GB RAM, 1 vCPU)
 }
@@ -21,7 +21,8 @@ type CreateSandboxRequest struct {
 // CreateSandboxResponse is the response for POST /v1/sandboxes
 type CreateSandboxResponse struct {
 	ID    string            `json:"id"`
-	Ports map[string]string `json:"ports"` // "80/tcp": "32768"
+	Ports map[string]string `json:"ports"`         // "80/tcp": "32768"
+	URL   string            `json:"url,omitempty"` // proxy URL, e.g. "http://mi-app.localhost:3000"
 }
 
 // SandboxSummary is a concise view of a sandbox for list endpoints.
@@ -33,6 +34,7 @@ type SandboxSummary struct {
 	State     string            `json:"state"`
 	Ports     map[string]string `json:"ports"`
 	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
+	URL       string            `json:"url,omitempty"`
 }
 
 // SandboxDetail is the full inspect response with only relevant fields.
@@ -47,6 +49,7 @@ type SandboxDetail struct {
 	StartedAt  string            `json:"started_at"`
 	FinishedAt string            `json:"finished_at"`
 	ExpiresAt  *time.Time        `json:"expires_at,omitempty"`
+	URL        string            `json:"url,omitempty"`
 }
 
 // RestartResponse is the response for POST /v1/sandboxes/:id/restart

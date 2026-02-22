@@ -15,6 +15,7 @@ import (
 	"open-sandbox/internal/config"
 	"open-sandbox/internal/database"
 	"open-sandbox/internal/docker"
+	"open-sandbox/internal/proxy"
 
 	_ "open-sandbox/docs"
 )
@@ -38,6 +39,22 @@ func main() {
 	repo := database.NewRepository(db)
 	dc := docker.New(repo)
 
+	// --- Reverse proxy ---
+	proxyServer := proxy.New(cfg.BaseDomain, repo)
+	dc.SetCacheInvalidator(proxyServer.InvalidateCache)
+
+	proxySrv := &http.Server{
+		Addr:    cfg.ProxyAddr,
+		Handler: proxyServer.Handler(),
+	}
+	go func() {
+		log.Printf("proxy listening on %s (domain: *.%s)", cfg.ProxyAddr, cfg.BaseDomain)
+		if err := proxySrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("proxy listen: %v", err)
+		}
+	}()
+
+	// --- API server ---
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 
@@ -46,7 +63,7 @@ func main() {
 		v1.Use(api.APIKeyAuth(cfg.APIKey))
 	}
 
-	h := api.New(dc)
+	h := api.New(dc, cfg.BaseDomain, cfg.ProxyAddr)
 	h.RegisterHealthCheck(r)
 	h.RegisterRoutes(v1)
 
@@ -66,8 +83,9 @@ func main() {
 	srv := &http.Server{Addr: cfg.Addr, Handler: r}
 
 	go func() {
+		log.Printf("api listening on %s", cfg.Addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %v", err)
+			log.Fatalf("api listen: %v", err)
 		}
 	}()
 
@@ -78,8 +96,11 @@ func main() {
 	defer cancel()
 
 	dc.Shutdown(shutdownCtx)
+	if err := proxySrv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("proxy shutdown: %v", err)
+	}
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("server shutdown: %v", err)
+		log.Fatalf("api shutdown: %v", err)
 	}
 
 	log.Println("server stopped")

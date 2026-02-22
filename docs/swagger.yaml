@@ -60,11 +60,9 @@ definitions:
         type: string
       name:
         type: string
-      ports:
-        description: 'container ports to expose: ["80/tcp", "443/tcp"]'
-        items:
-          type: string
-        type: array
+      port:
+        description: container port to expose, e.g. "3000/tcp"
+        type: string
       resources:
         allOf:
         - $ref: '#/definitions/models.ResourceLimits'
@@ -84,6 +82,9 @@ definitions:
           type: string
         description: '"80/tcp": "32768"'
         type: object
+      url:
+        description: proxy URL, e.g. "http://mi-app.localhost:3000"
+        type: string
     type: object
   models.ExecCommandRequest:
     properties:
@@ -242,6 +243,8 @@ definitions:
       started_at:
         type: string
       status:
+        type: string
+      url:
         type: string
     type: object
   models.SandboxStats:

@@ -39,7 +39,8 @@ type Sandbox struct {
 	ID    string `gorm:"primaryKey"` // Docker container ID
 	Name  string
 	Image string
-	Ports JSONMap `gorm:"type:json"` // e.g. {"80/tcp": "32768"}
+	Ports JSONMap `gorm:"type:json"` // e.g. {"3000/tcp": "32768"}
+	Port  string  // container port exposed, e.g. "3000/tcp"
 }
 
 // Command persists an executed command's metadata and result.

@@ -26,10 +26,11 @@ import (
 
 // Client wraps the Docker SDK and exposes sandbox operations.
 type Client struct {
-	cli      *moby.Client
-	repo     *database.Repository
-	timers   sync.Map // map[containerID]*timerEntry
-	commands sync.Map // map[cmdID]*runningCommand
+	cli            *moby.Client
+	repo           *database.Repository
+	timers         sync.Map          // map[containerID]*timerEntry
+	commands       sync.Map          // map[cmdID]*runningCommand
+	onCacheInvalid func(name string) // called when a sandbox's ports change or it is removed
 }
 
 // runningCommand tracks a command that is currently executing.
@@ -85,6 +86,23 @@ func New(repo *database.Repository) *Client {
 		mobyClient = cli
 	})
 	return &Client{cli: mobyClient, repo: repo}
+}
+
+// SetCacheInvalidator registers a callback invoked when a sandbox's ports
+// change (restart) or it is stopped/removed, so the proxy cache stays fresh.
+func (c *Client) SetCacheInvalidator(fn func(name string)) {
+	c.onCacheInvalid = fn
+}
+
+// invalidateCache notifies the proxy that a sandbox's route may have changed.
+func (c *Client) invalidateCache(containerID string) {
+	if c.onCacheInvalid == nil {
+		return
+	}
+	sb, err := c.repo.FindByID(containerID)
+	if err == nil && sb != nil && sb.Name != "" {
+		c.onCacheInvalid(sb.Name)
+	}
 }
 
 // Ping checks connectivity with the Docker daemon.
@@ -183,11 +201,13 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 		return models.CreateSandboxResponse{}, ErrImageNotFound
 	}
 
+	port := normalizePort(req.Port)
+
 	cfg := &container.Config{
 		Image:        req.Image,
 		Env:          req.Env,
 		Cmd:          []string{"sleep", "infinity"},
-		ExposedPorts: buildExposedPorts(req.Ports),
+		ExposedPorts: buildExposedPort(port),
 	}
 
 	hostCfg := &container.HostConfig{PublishAllPorts: true}
@@ -236,12 +256,19 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 
 	ports := extractPorts(info.Container.NetworkSettings.Ports)
 
+	// Use the Docker-assigned name if none was provided in the request.
+	name := req.Name
+	if name == "" {
+		name = strings.TrimPrefix(info.Container.Name, "/")
+	}
+
 	// Persist sandbox (fire-and-forget: log errors, don't block).
 	if err := c.repo.Save(database.Sandbox{
 		ID:    result.ID,
-		Name:  req.Name,
+		Name:  name,
 		Image: req.Image,
 		Ports: database.JSONMap(ports),
+		Port:  port,
 	}); err != nil {
 		log.Printf("database: failed to persist sandbox %s: %v", result.ID, err)
 	}
@@ -317,6 +344,7 @@ func (c *Client) Start(ctx context.Context, id string) (models.RestartResponse, 
 	if dbErr := c.repo.UpdatePorts(id, database.JSONMap(ports)); dbErr != nil {
 		log.Printf("database: failed to update ports for sandbox %s: %v", id, dbErr)
 	}
+	c.invalidateCache(id)
 
 	return models.RestartResponse{
 		Status:    "started",
@@ -337,6 +365,7 @@ func (c *Client) Stop(ctx context.Context, id string) error {
 	}
 
 	c.cancelTimer(id)
+	c.invalidateCache(id)
 	_, err = c.cli.ContainerStop(ctx, id, moby.ContainerStopOptions{})
 	return wrapNotFound(err)
 }
@@ -371,6 +400,7 @@ func (c *Client) Restart(ctx context.Context, id string) (models.RestartResponse
 	if dbErr := c.repo.UpdatePorts(id, database.JSONMap(ports)); dbErr != nil {
 		log.Printf("database: failed to update ports for sandbox %s: %v", id, dbErr)
 	}
+	c.invalidateCache(id)
 
 	return models.RestartResponse{
 		Status:    "restarted",
@@ -383,6 +413,7 @@ func (c *Client) Restart(ctx context.Context, id string) (models.RestartResponse
 // If the container no longer exists in Docker, it still cleans up the DB record.
 func (c *Client) Remove(ctx context.Context, id string) error {
 	c.cancelTimer(id)
+	c.invalidateCache(id)
 
 	// Kill all running commands for this sandbox.
 	c.commands.Range(func(key, value any) bool {
@@ -1021,20 +1052,28 @@ func wrapNotFound(err error) error {
 	return err
 }
 
-// buildExposedPorts converts ["80/tcp", "443/tcp"] to network.PortSet.
-func buildExposedPorts(ports []string) network.PortSet {
-	if len(ports) == 0 {
+// normalizePort ensures a port spec has a protocol suffix.
+// "3000" → "3000/tcp", "3000/tcp" → "3000/tcp" (unchanged).
+func normalizePort(port string) string {
+	if port == "" {
+		return ""
+	}
+	if !strings.Contains(port, "/") {
+		return port + "/tcp"
+	}
+	return port
+}
+
+// buildExposedPort converts a single port spec like "3000/tcp" to network.PortSet.
+func buildExposedPort(port string) network.PortSet {
+	if port == "" {
 		return nil
 	}
-	set := make(network.PortSet)
-	for _, p := range ports {
-		parsed, err := network.ParsePort(p)
-		if err != nil {
-			continue
-		}
-		set[parsed] = struct{}{}
+	parsed, err := network.ParsePort(port)
+	if err != nil {
+		return nil
 	}
-	return set
+	return network.PortSet{parsed: struct{}{}}
 }
 
 // extractPorts converts network.PortMap to map["80/tcp"]"32768".

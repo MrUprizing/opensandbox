@@ -1369,12 +1369,9 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
-                "ports": {
-                    "description": "container ports to expose: [\"80/tcp\", \"443/tcp\"]",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                "port": {
+                    "description": "container port to expose, e.g. \"3000/tcp\"",
+                    "type": "string"
                 },
                 "resources": {
                     "description": "CPU/memory limits, nil = defaults (1GB RAM, 1 vCPU)",
@@ -1402,6 +1399,10 @@ const docTemplate = `{
                     "additionalProperties": {
                         "type": "string"
                     }
+                },
+                "url": {
+                    "description": "proxy URL, e.g. \"http://mi-app.localhost:3000\"",
+                    "type": "string"
                 }
             }
         },
@@ -1637,6 +1638,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
+                    "type": "string"
+                },
+                "url": {
                     "type": "string"
                 }
             }

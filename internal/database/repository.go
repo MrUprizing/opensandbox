@@ -45,6 +45,18 @@ func (r *Repository) UpdatePorts(id string, ports JSONMap) error {
 	return r.db.Model(&Sandbox{}).Where("id = ?", id).Update("ports", ports).Error
 }
 
+// FindByName returns a sandbox by its name, or nil if not found.
+func (r *Repository) FindByName(name string) (*Sandbox, error) {
+	var s Sandbox
+	if err := r.db.First(&s, "name = ?", name).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &s, nil
+}
+
 // Delete removes a sandbox record by its container ID.
 func (r *Repository) Delete(id string) error {
 	return r.db.Delete(&Sandbox{}, "id = ?", id).Error
