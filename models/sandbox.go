@@ -89,6 +89,13 @@ type CommandListResponse struct {
 	Commands []CommandDetail `json:"commands"`
 }
 
+// CommandLogsResponse is the response for GET /v1/sandboxes/:id/cmd/:cmdId/logs (non-stream).
+type CommandLogsResponse struct {
+	Stdout   string `json:"stdout"`              // captured stdout text
+	Stderr   string `json:"stderr"`              // captured stderr text
+	ExitCode *int   `json:"exit_code,omitempty"` // nil while command is still running
+}
+
 // KillCommandRequest is the body for POST /v1/sandboxes/:id/cmd/:cmdId/kill
 type KillCommandRequest struct {
 	Signal int `json:"signal" binding:"required" example:"15"` // POSIX signal number (15=SIGTERM, 9=SIGKILL)

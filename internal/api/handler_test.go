@@ -42,6 +42,7 @@ type stub struct {
 	listCommands      func(string) ([]models.CommandDetail, error)
 	killCommand       func(string, string, int) (models.CommandDetail, error)
 	streamCommandLogs func(string, string) (io.ReadCloser, io.ReadCloser, error)
+	getCommandLogs    func(string, string) (models.CommandLogsResponse, error)
 	waitCommand       func(string, string) (models.CommandDetail, error)
 	stats             func(string) (models.SandboxStats, error)
 	readFile          func(string, string) (string, error)
@@ -114,6 +115,12 @@ func (s *stub) StreamCommandLogs(_ context.Context, sandboxID, cmdID string) (io
 		return s.streamCommandLogs(sandboxID, cmdID)
 	}
 	return io.NopCloser(bytes.NewReader(nil)), io.NopCloser(bytes.NewReader(nil)), nil
+}
+func (s *stub) GetCommandLogs(_ context.Context, sandboxID, cmdID string) (models.CommandLogsResponse, error) {
+	if s.getCommandLogs != nil {
+		return s.getCommandLogs(sandboxID, cmdID)
+	}
+	return models.CommandLogsResponse{}, nil
 }
 func (s *stub) WaitCommand(_ context.Context, sandboxID, cmdID string) (models.CommandDetail, error) {
 	if s.waitCommand != nil {
@@ -520,6 +527,55 @@ func TestKillCommand_MissingSignal(t *testing.T) {
 	w := do(r, "POST", "/v1/sandboxes/abc123/cmd/cmd_xyz/kill", map[string]any{})
 	assert.Equal(t, 400, w.Code)
 	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+}
+
+// ── Command Logs Tests ──────────────────────────────────────────────────────
+
+func TestGetCommandLogs_Snapshot(t *testing.T) {
+	ec := 0
+	r := newRouter(&stub{
+		getCommandLogs: func(sandboxID, cmdID string) (models.CommandLogsResponse, error) {
+			assert.Equal(t, "abc123", sandboxID)
+			assert.Equal(t, "cmd_xyz", cmdID)
+			return models.CommandLogsResponse{
+				Stdout:   "hello world\n",
+				Stderr:   "some warning\n",
+				ExitCode: &ec,
+			}, nil
+		},
+	})
+
+	w := do(r, "GET", "/v1/sandboxes/abc123/cmd/cmd_xyz/logs", nil)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "hello world")
+	assert.Contains(t, w.Body.String(), "some warning")
+	assert.Contains(t, w.Body.String(), `"exit_code":0`)
+}
+
+func TestGetCommandLogs_NotFound(t *testing.T) {
+	r := newRouter(&stub{
+		getCommandLogs: func(sandboxID, cmdID string) (models.CommandLogsResponse, error) {
+			return models.CommandLogsResponse{}, docker.ErrCommandNotFound
+		},
+	})
+
+	w := do(r, "GET", "/v1/sandboxes/abc123/cmd/cmd_xyz/logs", nil)
+	assert.Equal(t, 404, w.Code)
+}
+
+func TestGetCommandLogs_StreamMode(t *testing.T) {
+	r := newRouter(&stub{
+		streamCommandLogs: func(sandboxID, cmdID string) (io.ReadCloser, io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader([]byte("line1\n"))),
+				io.NopCloser(bytes.NewReader([]byte("err1\n"))),
+				nil
+		},
+	})
+
+	w := do(r, "GET", "/v1/sandboxes/abc123/cmd/cmd_xyz/logs?stream=true", nil)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Header().Get("Content-Type"), "application/x-ndjson")
+	assert.Contains(t, w.Body.String(), "stdout")
 }
 
 // ── File Tests ──────────────────────────────────────────────────────────────

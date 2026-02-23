@@ -648,14 +648,15 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Stream stdout and stderr of a command as ND-JSON lines.",
+                "description": "Returns stdout and stderr of a command. By default returns a JSON snapshot. Use ?stream=true to stream as ND-JSON lines in real time.",
                 "produces": [
+                    "application/json",
                     "application/x-ndjson"
                 ],
                 "tags": [
                     "commands"
                 ],
-                "summary": "Stream command logs",
+                "summary": "Get command logs",
                 "parameters": [
                     {
                         "type": "string",
@@ -670,13 +671,19 @@ const docTemplate = `{
                         "name": "cmdId",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Stream logs as ND-JSON (default: false)",
+                        "name": "stream",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "ND-JSON stream",
+                        "description": "JSON snapshot (default)",
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/models.CommandLogsResponse"
                         }
                     },
                     "404": {
@@ -1340,6 +1347,23 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/models.CommandDetail"
                     }
+                }
+            }
+        },
+        "models.CommandLogsResponse": {
+            "type": "object",
+            "properties": {
+                "exit_code": {
+                    "description": "nil while command is still running",
+                    "type": "integer"
+                },
+                "stderr": {
+                    "description": "captured stderr text",
+                    "type": "string"
+                },
+                "stdout": {
+                    "description": "captured stdout text",
+                    "type": "string"
                 }
             }
         },

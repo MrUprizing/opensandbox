@@ -45,6 +45,18 @@ definitions:
           $ref: '#/definitions/models.CommandDetail'
         type: array
     type: object
+  models.CommandLogsResponse:
+    properties:
+      exit_code:
+        description: nil while command is still running
+        type: integer
+      stderr:
+        description: captured stderr text
+        type: string
+      stdout:
+        description: captured stdout text
+        type: string
+    type: object
   models.CommandResponse:
     properties:
       command:
@@ -694,7 +706,8 @@ paths:
       - commands
   /sandboxes/{id}/cmd/{cmdId}/logs:
     get:
-      description: Stream stdout and stderr of a command as ND-JSON lines.
+      description: Returns stdout and stderr of a command. By default returns a JSON
+        snapshot. Use ?stream=true to stream as ND-JSON lines in real time.
       parameters:
       - description: Sandbox ID
         in: path
@@ -706,13 +719,18 @@ paths:
         name: cmdId
         required: true
         type: string
+      - description: 'Stream logs as ND-JSON (default: false)'
+        in: query
+        name: stream
+        type: boolean
       produces:
+      - application/json
       - application/x-ndjson
       responses:
         "200":
-          description: ND-JSON stream
+          description: JSON snapshot (default)
           schema:
-            type: string
+            $ref: '#/definitions/models.CommandLogsResponse'
         "404":
           description: Not Found
           schema:
@@ -723,7 +741,7 @@ paths:
             $ref: '#/definitions/internal_api.ErrorResponse'
       security:
       - ApiKeyAuth: []
-      summary: Stream command logs
+      summary: Get command logs
       tags:
       - commands
   /sandboxes/{id}/files:

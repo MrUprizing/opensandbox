@@ -761,6 +761,33 @@ func (c *Client) StreamCommandLogs(ctx context.Context, sandboxID, cmdID string)
 	return rc.stdout.NewReader(), rc.stderr.NewReader(), nil
 }
 
+// GetCommandLogs returns a snapshot of stdout and stderr for a command without streaming.
+func (c *Client) GetCommandLogs(ctx context.Context, sandboxID, cmdID string) (models.CommandLogsResponse, error) {
+	v, ok := c.commands.Load(cmdID)
+	if !ok {
+		return models.CommandLogsResponse{}, ErrCommandNotFound
+	}
+
+	rc := v.(*runningCommand)
+	if rc.sandboxID != sandboxID {
+		return models.CommandLogsResponse{}, ErrCommandNotFound
+	}
+
+	rc.mu.Lock()
+	exitCode := (*int)(nil)
+	if rc.finished {
+		ec := rc.exitCode
+		exitCode = &ec
+	}
+	rc.mu.Unlock()
+
+	return models.CommandLogsResponse{
+		Stdout:   string(rc.stdout.Bytes()),
+		Stderr:   string(rc.stderr.Bytes()),
+		ExitCode: exitCode,
+	}, nil
+}
+
 // WaitCommand blocks until a command finishes and returns the updated detail.
 func (c *Client) WaitCommand(ctx context.Context, sandboxID, cmdID string) (models.CommandDetail, error) {
 	v, ok := c.commands.Load(cmdID)

@@ -379,21 +379,44 @@ func (h *Handler) killCommand(c *gin.Context) {
 	c.JSON(http.StatusOK, models.CommandResponse{Command: cmd})
 }
 
-// streamCommandLogs handles GET /v1/sandboxes/:id/cmd/:cmdId/logs.
-// @Summary      Stream command logs
-// @Description  Stream stdout and stderr of a command as ND-JSON lines.
+// getCommandLogs handles GET /v1/sandboxes/:id/cmd/:cmdId/logs.
+// @Summary      Get command logs
+// @Description  Returns stdout and stderr of a command. By default returns a JSON snapshot. Use ?stream=true to stream as ND-JSON lines in real time.
 // @Tags         commands
+// @Produce      json
 // @Produce      application/x-ndjson
 // @Param        id      path      string  true  "Sandbox ID"
 // @Param        cmdId   path      string  true  "Command ID"
-// @Success      200  {string}  string  "ND-JSON stream"
+// @Param        stream  query     bool    false "Stream logs as ND-JSON (default: false)"
+// @Success      200  {object}  models.CommandLogsResponse  "JSON snapshot (default)"
 // @Failure      404  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
 // @Security     ApiKeyAuth
 // @Router       /sandboxes/{id}/cmd/{cmdId}/logs [get]
-func (h *Handler) streamCommandLogs(c *gin.Context) {
+func (h *Handler) getCommandLogs(c *gin.Context) {
+	sandboxID := c.Param("id")
+	cmdID := c.Param("cmdId")
+
+	// Stream mode: ND-JSON real-time logs.
+	if c.Query("stream") == "true" {
+		h.streamLogs(c, sandboxID, cmdID)
+		return
+	}
+
+	// Default: JSON snapshot.
+	logs, err := h.docker.GetCommandLogs(c.Request.Context(), sandboxID, cmdID)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, logs)
+}
+
+// streamLogs streams stdout/stderr as ND-JSON lines until the command finishes.
+func (h *Handler) streamLogs(c *gin.Context, sandboxID, cmdID string) {
 	stdoutR, stderrR, err := h.docker.StreamCommandLogs(
-		c.Request.Context(), c.Param("id"), c.Param("cmdId"),
+		c.Request.Context(), sandboxID, cmdID,
 	)
 	if err != nil {
 		internalError(c, err)

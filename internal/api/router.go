@@ -24,7 +24,7 @@ func (h *Handler) RegisterRoutes(v1 *gin.RouterGroup) {
 	sb.GET("/:id/cmd", h.listCommands)
 	sb.GET("/:id/cmd/:cmdId", h.getCommand)
 	sb.POST("/:id/cmd/:cmdId/kill", h.killCommand)
-	sb.GET("/:id/cmd/:cmdId/logs", h.streamCommandLogs)
+	sb.GET("/:id/cmd/:cmdId/logs", h.getCommandLogs)
 	sb.GET("/:id/stats", h.getStats)
 	sb.GET("/:id/files", h.readFile)
 	sb.PUT("/:id/files", h.writeFile)

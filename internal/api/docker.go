@@ -25,6 +25,7 @@ type DockerClient interface {
 	ListCommands(ctx context.Context, sandboxID string) ([]models.CommandDetail, error)
 	KillCommand(ctx context.Context, sandboxID, cmdID string, signal int) (models.CommandDetail, error)
 	StreamCommandLogs(ctx context.Context, sandboxID, cmdID string) (io.ReadCloser, io.ReadCloser, error)
+	GetCommandLogs(ctx context.Context, sandboxID, cmdID string) (models.CommandLogsResponse, error)
 	WaitCommand(ctx context.Context, sandboxID, cmdID string) (models.CommandDetail, error)
 	Stats(ctx context.Context, id string) (models.SandboxStats, error)
 	ReadFile(ctx context.Context, id, path string) (string, error)
