@@ -38,7 +38,7 @@ func main() {
 
 	db := database.New("sandbox.db")
 	repo := database.NewRepository(db)
-	dc := docker.New(repo)
+	dc := docker.New(docker.WithRepository(repo))
 
 	// --- Reverse proxy (multi-listen) ---
 	proxyServer := proxy.New(cfg.BaseDomain, repo)

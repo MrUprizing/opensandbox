@@ -11,6 +11,7 @@ type ResourceLimits struct {
 // CreateSandboxRequest is the body for POST /v1/sandboxes
 type CreateSandboxRequest struct {
 	Image     string          `json:"image" binding:"required" example:"node:24"`
+	Name      string          `json:"name,omitempty"`            // pre-generated name (used by orchestrator → worker). Empty = auto-generate.
 	Ports     []string        `json:"ports" example:"3000,8080"` // container ports to expose, e.g. ["3000", "8080/tcp"]. First port is the default for proxy routing.
 	Timeout   int             `json:"timeout" example:"900"`     // seconds until auto-stop, 0 = default (900s)
 	Resources *ResourceLimits `json:"resources"`                 // CPU/memory limits, nil = defaults (1GB RAM, 1 vCPU)

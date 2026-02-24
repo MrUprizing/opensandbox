@@ -29,24 +29,43 @@ import (
 // Client wraps the Docker SDK and exposes sandbox operations.
 type Client struct {
 	cli            *moby.Client
-	repo           *database.Repository
-	timers         sync.Map          // map[containerID]*timerEntry
-	commands       sync.Map          // map[cmdID]*runningCommand
-	onCacheInvalid func(name string) // called when a sandbox's ports change or it is removed
+	repo           *database.Repository // nil in worker mode (no DB)
+	hostIP         string               // bind IP for container ports ("127.0.0.1" or "0.0.0.0")
+	timers         sync.Map             // map[containerID]*timerEntry
+	commands       sync.Map             // map[cmdID]*runningCommand
+	onCacheInvalid func(name string)    // called when a sandbox's ports change or it is removed
+}
+
+// Option configures a Client.
+type Option func(*Client)
+
+// WithRepository enables database persistence for sandboxes and commands.
+// When nil (default), the client operates in stateless mode (worker).
+func WithRepository(repo *database.Repository) Option {
+	return func(c *Client) { c.repo = repo }
+}
+
+// WithHostIP sets the bind IP for container port mappings.
+// Use "127.0.0.1" (default) for local/all-in-one, "0.0.0.0" for worker mode.
+func WithHostIP(ip string) Option {
+	return func(c *Client) { c.hostIP = ip }
 }
 
 // runningCommand tracks a command that is currently executing.
 type runningCommand struct {
-	execID    string             // Docker exec instance ID
-	sandboxID string             // parent sandbox container ID
-	cmd       []string           // original command (for pkill pattern)
-	cancel    context.CancelFunc // cancels the exec context
-	stdout    *ringBuffer        // captures stdout
-	stderr    *ringBuffer        // captures stderr
-	done      chan struct{}      // closed when command finishes
-	mu        sync.Mutex
-	exitCode  int
-	finished  bool
+	execID     string             // Docker exec instance ID
+	sandboxID  string             // parent sandbox container ID
+	cmd        []string           // original command (for pkill pattern)
+	cwd        string             // working directory
+	startedAt  int64              // unix milliseconds
+	cancel     context.CancelFunc // cancels the exec context
+	stdout     *ringBuffer        // captures stdout
+	stderr     *ringBuffer        // captures stderr
+	done       chan struct{}      // closed when command finishes
+	mu         sync.Mutex
+	exitCode   int
+	finishedAt int64 // unix milliseconds, 0 while running
+	finished   bool
 }
 
 // timerEntry holds a timer and a cancel channel to avoid goroutine leaks.
@@ -76,10 +95,10 @@ var (
 	mobyClient *moby.Client
 )
 
-// New creates a Docker Client with the given repository.
-// The underlying Docker connection is a singleton (created once),
-// but each Client gets its own repository.
-func New(repo *database.Repository) *Client {
+// New creates a Docker Client with the given options.
+// The underlying Docker connection is a singleton (created once).
+// Without WithRepository, the client runs in stateless mode (no DB).
+func New(opts ...Option) *Client {
 	once.Do(func() {
 		cli, err := moby.NewClientWithOpts(moby.FromEnv, moby.WithAPIVersionNegotiation())
 		if err != nil {
@@ -87,7 +106,11 @@ func New(repo *database.Repository) *Client {
 		}
 		mobyClient = cli
 	})
-	return &Client{cli: mobyClient, repo: repo}
+	c := &Client{cli: mobyClient, hostIP: "127.0.0.1"}
+	for _, o := range opts {
+		o(c)
+	}
+	return c
 }
 
 // SetCacheInvalidator registers a callback invoked when a sandbox's ports
@@ -101,9 +124,11 @@ func (c *Client) invalidateCache(containerID string) {
 	if c.onCacheInvalid == nil {
 		return
 	}
-	sb, err := c.repo.FindByID(containerID)
-	if err == nil && sb != nil && sb.Name != "" {
-		c.onCacheInvalid(sb.Name)
+	if c.repo != nil {
+		sb, err := c.repo.FindByID(containerID)
+		if err == nil && sb != nil && sb.Name != "" {
+			c.onCacheInvalid(sb.Name)
+		}
 	}
 }
 
@@ -113,19 +138,11 @@ func (c *Client) Ping(ctx context.Context) error {
 	return err
 }
 
-// List returns all sandboxes tracked in the database, enriched with live
-// state from Docker. Stopped containers are always included.
+// List returns all sandboxes, enriched with live state from Docker.
+// With a repository: uses DB records as source of truth (includes stopped containers).
+// Without a repository: lists directly from the Docker daemon.
 func (c *Client) List(ctx context.Context) ([]models.SandboxSummary, error) {
-	// Fetch all persisted sandboxes from the database.
-	dbSandboxes, err := c.repo.FindAll()
-	if err != nil {
-		return nil, err
-	}
-	if len(dbSandboxes) == 0 {
-		return []models.SandboxSummary{}, nil
-	}
-
-	// Fetch all containers (including stopped) to build a lookup map.
+	// Fetch all containers (including stopped) from Docker.
 	result, err := c.cli.ContainerList(ctx, moby.ContainerListOptions{All: true})
 	if err != nil {
 		return nil, err
@@ -153,6 +170,36 @@ func (c *Client) List(ctx context.Context) ([]models.SandboxSummary, error) {
 			State:  string(item.State),
 			Ports:  ports,
 		}
+	}
+
+	// Without DB: build summaries directly from Docker containers.
+	if c.repo == nil {
+		summaries := make([]models.SandboxSummary, 0, len(lookup))
+		for id, info := range lookup {
+			s := models.SandboxSummary{
+				ID:     id,
+				Name:   info.Name,
+				Image:  info.Image,
+				Status: info.Status,
+				State:  info.State,
+				Ports:  portKeys(info.Ports),
+			}
+			if entry := c.getTimerEntry(id); entry != nil {
+				ea := entry.expiresAt
+				s.ExpiresAt = &ea
+			}
+			summaries = append(summaries, s)
+		}
+		return summaries, nil
+	}
+
+	// With DB: use persisted records as source of truth.
+	dbSandboxes, err := c.repo.FindAll()
+	if err != nil {
+		return nil, err
+	}
+	if len(dbSandboxes) == 0 {
+		return []models.SandboxSummary{}, nil
 	}
 
 	summaries := make([]models.SandboxSummary, 0, len(dbSandboxes))
@@ -217,7 +264,7 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 	}
 
 	hostCfg := &container.HostConfig{
-		PortBindings: buildPortBindings(ports),
+		PortBindings: buildPortBindings(ports, c.hostIP),
 	}
 
 	// Apply resource limits (defaults: 1GB RAM, 1 vCPU)
@@ -236,11 +283,18 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 		NanoCPUs: int64(cpus * 1e9),
 	}
 
-	// Auto-generate a unique sandbox name.
-	name := generateUniqueName(func(n string) bool {
-		sb, _ := c.repo.FindByName(n)
-		return sb != nil
-	})
+	// Determine sandbox name: use pre-generated name if provided, otherwise auto-generate.
+	name := req.Name
+	if name == "" {
+		if c.repo != nil {
+			name = generateUniqueName(func(n string) bool {
+				sb, _ := c.repo.FindByName(n)
+				return sb != nil
+			})
+		} else {
+			name = generateUniqueName(nil)
+		}
+	}
 
 	result, err := c.cli.ContainerCreate(ctx, moby.ContainerCreateOptions{
 		Config:     cfg,
@@ -270,15 +324,17 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 
 	assignedPorts := extractPorts(info.Container.NetworkSettings.Ports)
 
-	// Persist sandbox (fire-and-forget: log errors, don't block).
-	if err := c.repo.Save(database.Sandbox{
-		ID:    result.ID,
-		Name:  name,
-		Image: req.Image,
-		Ports: database.JSONMap(assignedPorts),
-		Port:  mainPort,
-	}); err != nil {
-		log.Printf("database: failed to persist sandbox %s: %v", result.ID, err)
+	// Persist sandbox if repository is available.
+	if c.repo != nil {
+		if err := c.repo.Save(database.Sandbox{
+			ID:    result.ID,
+			Name:  name,
+			Image: req.Image,
+			Ports: database.JSONMap(assignedPorts),
+			Port:  mainPort,
+		}); err != nil {
+			log.Printf("database: failed to persist sandbox %s: %v", result.ID, err)
+		}
 	}
 
 	return models.CreateSandboxResponse{
@@ -350,8 +406,10 @@ func (c *Client) Start(ctx context.Context, id string) (models.RestartResponse, 
 
 	ports := extractPorts(info.Container.NetworkSettings.Ports)
 
-	if dbErr := c.repo.UpdatePorts(id, database.JSONMap(ports)); dbErr != nil {
-		log.Printf("database: failed to update ports for sandbox %s: %v", id, dbErr)
+	if c.repo != nil {
+		if dbErr := c.repo.UpdatePorts(id, database.JSONMap(ports)); dbErr != nil {
+			log.Printf("database: failed to update ports for sandbox %s: %v", id, dbErr)
+		}
 	}
 	c.invalidateCache(id)
 
@@ -406,8 +464,10 @@ func (c *Client) Restart(ctx context.Context, id string) (models.RestartResponse
 	ports := extractPorts(info.Container.NetworkSettings.Ports)
 
 	// Update persisted ports after restart (they may change).
-	if dbErr := c.repo.UpdatePorts(id, database.JSONMap(ports)); dbErr != nil {
-		log.Printf("database: failed to update ports for sandbox %s: %v", id, dbErr)
+	if c.repo != nil {
+		if dbErr := c.repo.UpdatePorts(id, database.JSONMap(ports)); dbErr != nil {
+			log.Printf("database: failed to update ports for sandbox %s: %v", id, dbErr)
+		}
 	}
 	c.invalidateCache(id)
 
@@ -438,13 +498,14 @@ func (c *Client) Remove(ctx context.Context, id string) error {
 		return err
 	}
 
-	// Clean up command records from DB.
-	if dbErr := c.repo.DeleteCommandsBySandbox(id); dbErr != nil {
-		log.Printf("database: failed to delete commands for sandbox %s: %v", id, dbErr)
-	}
-
-	if dbErr := c.repo.Delete(id); dbErr != nil {
-		log.Printf("database: failed to delete sandbox %s: %v", id, dbErr)
+	// Clean up DB records if repository is available.
+	if c.repo != nil {
+		if dbErr := c.repo.DeleteCommandsBySandbox(id); dbErr != nil {
+			log.Printf("database: failed to delete commands for sandbox %s: %v", id, dbErr)
+		}
+		if dbErr := c.repo.Delete(id); dbErr != nil {
+			log.Printf("database: failed to delete sandbox %s: %v", id, dbErr)
+		}
 	}
 	return nil
 }
@@ -584,17 +645,19 @@ func (c *Client) ExecCommand(ctx context.Context, sandboxID string, req models.E
 		return models.CommandDetail{}, wrapNotFound(err)
 	}
 
-	// Persist command to DB.
-	argsJSON, _ := json.Marshal(req.Args)
-	if err := c.repo.SaveCommand(database.Command{
-		ID:        cmdID,
-		SandboxID: sandboxID,
-		Name:      req.Command,
-		Args:      string(argsJSON),
-		Cwd:       req.Cwd,
-		StartedAt: now,
-	}); err != nil {
-		return models.CommandDetail{}, fmt.Errorf("save command: %w", err)
+	// Persist command to DB if repository is available.
+	if c.repo != nil {
+		argsJSON, _ := json.Marshal(req.Args)
+		if err := c.repo.SaveCommand(database.Command{
+			ID:        cmdID,
+			SandboxID: sandboxID,
+			Name:      req.Command,
+			Args:      string(argsJSON),
+			Cwd:       req.Cwd,
+			StartedAt: now,
+		}); err != nil {
+			return models.CommandDetail{}, fmt.Errorf("save command: %w", err)
+		}
 	}
 
 	// Set up ring buffers and tracking.
@@ -606,6 +669,8 @@ func (c *Client) ExecCommand(ctx context.Context, sandboxID string, req models.E
 		execID:    execCfg.ID,
 		sandboxID: sandboxID,
 		cmd:       fullCmd,
+		cwd:       req.Cwd,
+		startedAt: now,
 		cancel:    cancel,
 		stdout:    stdoutBuf,
 		stderr:    stderrBuf,
@@ -629,11 +694,15 @@ func (c *Client) ExecCommand(ctx context.Context, sandboxID string, req models.E
 		attached, err := c.cli.ExecAttach(execCtx, execCfg.ID, moby.ExecAttachOptions{})
 		if err != nil {
 			log.Printf("exec attach %s: %v", cmdID, err)
+			fin := time.Now().UnixMilli()
 			rc.mu.Lock()
 			rc.exitCode = -1
+			rc.finishedAt = fin
 			rc.finished = true
 			rc.mu.Unlock()
-			c.repo.UpdateCommandFinished(cmdID, -1, time.Now().UnixMilli())
+			if c.repo != nil {
+				c.repo.UpdateCommandFinished(cmdID, -1, fin)
+			}
 			return
 		}
 		defer attached.Close()
@@ -648,13 +717,16 @@ func (c *Client) ExecCommand(ctx context.Context, sandboxID string, req models.E
 			exitCode = inspect.ExitCode
 		}
 
-		finishedAt := time.Now().UnixMilli()
+		fin := time.Now().UnixMilli()
 		rc.mu.Lock()
 		rc.exitCode = exitCode
+		rc.finishedAt = fin
 		rc.finished = true
 		rc.mu.Unlock()
 
-		c.repo.UpdateCommandFinished(cmdID, exitCode, finishedAt)
+		if c.repo != nil {
+			c.repo.UpdateCommandFinished(cmdID, exitCode, fin)
+		}
 	}()
 
 	return models.CommandDetail{
@@ -669,18 +741,31 @@ func (c *Client) ExecCommand(ctx context.Context, sandboxID string, req models.E
 
 // GetCommand returns command details by ID.
 func (c *Client) GetCommand(ctx context.Context, sandboxID, cmdID string) (models.CommandDetail, error) {
-	dbCmd, err := c.repo.FindCommandByID(cmdID)
-	if err != nil {
-		return models.CommandDetail{}, err
-	}
-	if dbCmd == nil {
-		return models.CommandDetail{}, ErrCommandNotFound
-	}
-	if dbCmd.SandboxID != sandboxID {
-		return models.CommandDetail{}, ErrCommandNotFound
+	// Try in-memory first (works in both modes).
+	if v, ok := c.commands.Load(cmdID); ok {
+		rc := v.(*runningCommand)
+		if rc.sandboxID != sandboxID {
+			return models.CommandDetail{}, ErrCommandNotFound
+		}
+		return c.runningCommandToDetail(cmdID, rc), nil
 	}
 
-	return c.dbCommandToDetail(*dbCmd), nil
+	// Fall back to DB if available.
+	if c.repo != nil {
+		dbCmd, err := c.repo.FindCommandByID(cmdID)
+		if err != nil {
+			return models.CommandDetail{}, err
+		}
+		if dbCmd == nil {
+			return models.CommandDetail{}, ErrCommandNotFound
+		}
+		if dbCmd.SandboxID != sandboxID {
+			return models.CommandDetail{}, ErrCommandNotFound
+		}
+		return c.dbCommandToDetail(*dbCmd), nil
+	}
+
+	return models.CommandDetail{}, ErrCommandNotFound
 }
 
 // ListCommands returns all commands for a sandbox.
@@ -690,32 +775,49 @@ func (c *Client) ListCommands(ctx context.Context, sandboxID string) ([]models.C
 		return nil, wrapNotFound(err)
 	}
 
-	dbCmds, err := c.repo.FindCommandsBySandbox(sandboxID)
-	if err != nil {
-		return nil, err
+	// With DB: use persisted records as source of truth.
+	if c.repo != nil {
+		dbCmds, err := c.repo.FindCommandsBySandbox(sandboxID)
+		if err != nil {
+			return nil, err
+		}
+		details := make([]models.CommandDetail, 0, len(dbCmds))
+		for _, cmd := range dbCmds {
+			details = append(details, c.dbCommandToDetail(cmd))
+		}
+		return details, nil
 	}
 
-	details := make([]models.CommandDetail, 0, len(dbCmds))
-	for _, cmd := range dbCmds {
-		details = append(details, c.dbCommandToDetail(cmd))
-	}
+	// Without DB: list from in-memory sync.Map.
+	var details []models.CommandDetail
+	c.commands.Range(func(key, value any) bool {
+		cmdID := key.(string)
+		rc := value.(*runningCommand)
+		if rc.sandboxID == sandboxID {
+			details = append(details, c.runningCommandToDetail(cmdID, rc))
+		}
+		return true
+	})
 	return details, nil
 }
 
 // KillCommand sends a signal to a running command.
 func (c *Client) KillCommand(ctx context.Context, sandboxID, cmdID string, signal int) (models.CommandDetail, error) {
-	// Look up running command.
+	// Look up running command in memory.
 	v, ok := c.commands.Load(cmdID)
 	if !ok {
-		// Check if it exists in DB.
-		dbCmd, err := c.repo.FindCommandByID(cmdID)
-		if err != nil {
-			return models.CommandDetail{}, err
+		// Not in memory — check DB if available, otherwise not found.
+		if c.repo != nil {
+			dbCmd, err := c.repo.FindCommandByID(cmdID)
+			if err != nil {
+				return models.CommandDetail{}, err
+			}
+			if dbCmd == nil {
+				return models.CommandDetail{}, ErrCommandNotFound
+			}
+			return models.CommandDetail{}, ErrCommandFinished
 		}
-		if dbCmd == nil {
-			return models.CommandDetail{}, ErrCommandNotFound
-		}
-		return models.CommandDetail{}, ErrCommandFinished
+		return models.CommandDetail{}, ErrCommandNotFound
 	}
 
 	rc := v.(*runningCommand)
@@ -835,6 +937,29 @@ func (c *Client) dbCommandToDetail(cmd database.Command) models.CommandDetail {
 		rc.mu.Unlock()
 	}
 
+	return detail
+}
+
+// runningCommandToDetail converts an in-memory runningCommand to models.CommandDetail.
+// Used when no DB is available (worker mode).
+func (c *Client) runningCommandToDetail(cmdID string, rc *runningCommand) models.CommandDetail {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+
+	detail := models.CommandDetail{
+		ID:        cmdID,
+		Name:      rc.cmd[0],
+		Args:      rc.cmd[1:],
+		Cwd:       rc.cwd,
+		SandboxID: rc.sandboxID,
+		StartedAt: rc.startedAt,
+	}
+	if rc.finished {
+		ec := rc.exitCode
+		detail.ExitCode = &ec
+		fa := rc.finishedAt
+		detail.FinishedAt = &fa
+	}
 	return detail
 }
 
@@ -1130,9 +1255,10 @@ func buildExposedPorts(ports []string) network.PortSet {
 	return ps
 }
 
-// buildPortBindings creates port bindings that only listen on 127.0.0.1 (loopback).
-// This ensures container ports are only reachable through the reverse proxy, not directly.
-func buildPortBindings(ports []string) network.PortMap {
+// buildPortBindings creates port bindings on the configured host IP.
+// "127.0.0.1" (default/all-in-one) ensures ports are only reachable through the proxy.
+// "0.0.0.0" (worker mode) allows the orchestrator to reach container ports over the network.
+func buildPortBindings(ports []string, hostIP string) network.PortMap {
 	if len(ports) == 0 {
 		return nil
 	}
@@ -1142,7 +1268,7 @@ func buildPortBindings(ports []string) network.PortMap {
 		if err != nil {
 			continue
 		}
-		pm[parsed] = []network.PortBinding{{HostIP: netip.MustParseAddr("127.0.0.1")}}
+		pm[parsed] = []network.PortBinding{{HostIP: netip.MustParseAddr(hostIP)}}
 	}
 	if len(pm) == 0 {
 		return nil

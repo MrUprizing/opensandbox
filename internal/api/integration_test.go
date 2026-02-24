@@ -23,7 +23,7 @@ func realRouter() *gin.Engine {
 	db := database.New(":memory:")
 	repo := database.NewRepository(db)
 	r := gin.New()
-	h := api.New(docker.New(repo), "localhost", ":3000")
+	h := api.New(docker.New(docker.WithRepository(repo)), "localhost", ":3000")
 	h.RegisterHealthCheck(r)
 	h.RegisterRoutes(r.Group("/v1"))
 	return r
