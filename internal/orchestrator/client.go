@@ -8,7 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"sync"
+	"net/url"
 
 	"open-sandbox/internal/database"
 	"open-sandbox/internal/docker"
@@ -463,7 +463,7 @@ func (c *RemoteDockerClient) ReadFile(ctx context.Context, id, path string) (str
 		return "", err
 	}
 	var resp models.FileReadResponse
-	if err := c.doJSON(ctx, w, http.MethodGet, "/sandboxes/"+id+"/files?path="+path, nil, &resp); err != nil {
+	if err := c.doJSON(ctx, w, http.MethodGet, "/sandboxes/"+id+"/files?path="+url.QueryEscape(path), nil, &resp); err != nil {
 		return "", err
 	}
 	return resp.Content, nil
@@ -474,7 +474,7 @@ func (c *RemoteDockerClient) WriteFile(ctx context.Context, id, path, content st
 	if err != nil {
 		return err
 	}
-	return c.doJSON(ctx, w, http.MethodPut, "/sandboxes/"+id+"/files?path="+path,
+	return c.doJSON(ctx, w, http.MethodPut, "/sandboxes/"+id+"/files?path="+url.QueryEscape(path),
 		models.FileWriteRequest{Content: content}, nil)
 }
 
@@ -483,7 +483,7 @@ func (c *RemoteDockerClient) DeleteFile(ctx context.Context, id, path string) er
 	if err != nil {
 		return err
 	}
-	return c.doNoContent(ctx, w, http.MethodDelete, "/sandboxes/"+id+"/files?path="+path, nil)
+	return c.doNoContent(ctx, w, http.MethodDelete, "/sandboxes/"+id+"/files?path="+url.QueryEscape(path), nil)
 }
 
 func (c *RemoteDockerClient) ListDir(ctx context.Context, id, path string) (string, error) {
@@ -492,7 +492,7 @@ func (c *RemoteDockerClient) ListDir(ctx context.Context, id, path string) (stri
 		return "", err
 	}
 	var resp models.FileListResponse
-	if err := c.doJSON(ctx, w, http.MethodGet, "/sandboxes/"+id+"/files/list?path="+path, nil, &resp); err != nil {
+	if err := c.doJSON(ctx, w, http.MethodGet, "/sandboxes/"+id+"/files/list?path="+url.QueryEscape(path), nil, &resp); err != nil {
 		return "", err
 	}
 	return resp.Output, nil
@@ -506,25 +506,39 @@ func (c *RemoteDockerClient) PullImage(ctx context.Context, image string) error 
 		return ErrNoWorkers
 	}
 
-	// Pull on all workers in parallel.
-	var wg sync.WaitGroup
-	errs := make(chan error, len(workers))
+	// Pull on all workers in parallel. Collect per-worker errors.
+	type pullResult struct {
+		workerID string
+		err      error
+	}
+	ch := make(chan pullResult, len(workers))
 	for _, w := range workers {
-		wg.Add(1)
 		go func(w WorkerInfo) {
-			defer wg.Done()
-			errs <- c.doJSON(ctx, w, http.MethodPost, "/images/pull",
+			err := c.doJSON(ctx, w, http.MethodPost, "/images/pull",
 				models.ImagePullRequest{Image: image}, nil)
+			ch <- pullResult{workerID: w.ID, err: err}
 		}(w)
 	}
-	wg.Wait()
-	close(errs)
 
-	// Return first error if any.
-	for err := range errs {
-		if err != nil {
-			return err
+	var firstErr error
+	var failed int
+	for range workers {
+		r := <-ch
+		if r.err != nil {
+			failed++
+			log.Printf("orchestrator: pull %s on worker %s failed: %v", image, r.workerID, r.err)
+			if firstErr == nil {
+				firstErr = r.err
+			}
 		}
+	}
+
+	// Fail only if ALL workers failed.
+	if failed == len(workers) {
+		return firstErr
+	}
+	if failed > 0 {
+		log.Printf("orchestrator: pull %s succeeded on %d/%d workers", image, len(workers)-failed, len(workers))
 	}
 	return nil
 }
@@ -535,45 +549,74 @@ func (c *RemoteDockerClient) RemoveImage(ctx context.Context, id string, force b
 		return ErrNoWorkers
 	}
 
-	forceParam := ""
+	path := "/images/" + url.PathEscape(id)
 	if force {
-		forceParam = "?force=true"
+		path += "?force=true"
 	}
 
-	var wg sync.WaitGroup
-	errs := make(chan error, len(workers))
+	type removeResult struct {
+		workerID string
+		err      error
+	}
+	ch := make(chan removeResult, len(workers))
 	for _, w := range workers {
-		wg.Add(1)
 		go func(w WorkerInfo) {
-			defer wg.Done()
-			errs <- c.doNoContent(ctx, w, http.MethodDelete, "/images/"+id+forceParam, nil)
+			err := c.doNoContent(ctx, w, http.MethodDelete, path, nil)
+			ch <- removeResult{workerID: w.ID, err: err}
 		}(w)
 	}
-	wg.Wait()
-	close(errs)
 
-	for err := range errs {
-		if err != nil {
-			return err
+	var firstErr error
+	var failed int
+	for range workers {
+		r := <-ch
+		if r.err != nil {
+			failed++
+			log.Printf("orchestrator: remove image %s on worker %s failed: %v", id, r.workerID, r.err)
+			if firstErr == nil {
+				firstErr = r.err
+			}
 		}
+	}
+
+	if failed == len(workers) {
+		return firstErr
 	}
 	return nil
 }
 
 func (c *RemoteDockerClient) InspectImage(ctx context.Context, id string) (models.ImageDetail, error) {
 	workers := c.registry.All()
+	path := "/images/" + url.PathEscape(id)
 	for _, w := range workers {
 		var resp models.ImageDetail
-		if err := c.doJSON(ctx, w, http.MethodGet, "/images/"+id, nil, &resp); err == nil {
+		if err := c.doJSON(ctx, w, http.MethodGet, path, nil, &resp); err == nil {
 			return resp, nil
 		}
 	}
 	return models.ImageDetail{}, docker.ErrImageNotFound
 }
 
+// ListImages returns images from all workers (or a single worker if workerID is specified).
+// Results are merged and deduplicated by image ID.
 func (c *RemoteDockerClient) ListImages(ctx context.Context) ([]models.ImageSummary, error) {
-	workers := c.registry.All()
-	if len(workers) == 0 {
+	return c.ListImagesFromWorkers(ctx, "")
+}
+
+// ListImagesFromWorkers lists images from a specific worker or all workers.
+func (c *RemoteDockerClient) ListImagesFromWorkers(ctx context.Context, workerID string) ([]models.ImageSummary, error) {
+	var targets []WorkerInfo
+	if workerID != "" {
+		w, err := c.registry.Lookup(workerID)
+		if err != nil {
+			return nil, err
+		}
+		targets = []WorkerInfo{w}
+	} else {
+		targets = c.registry.All()
+	}
+
+	if len(targets) == 0 {
 		return []models.ImageSummary{}, nil
 	}
 
@@ -581,8 +624,8 @@ func (c *RemoteDockerClient) ListImages(ctx context.Context) ([]models.ImageSumm
 		items []models.ImageSummary
 		err   error
 	}
-	ch := make(chan result, len(workers))
-	for _, w := range workers {
+	ch := make(chan result, len(targets))
+	for _, w := range targets {
 		go func(w WorkerInfo) {
 			var resp struct {
 				Images []models.ImageSummary `json:"images"`
@@ -595,7 +638,7 @@ func (c *RemoteDockerClient) ListImages(ctx context.Context) ([]models.ImageSumm
 	// Merge and deduplicate by ID.
 	seen := make(map[string]bool)
 	var all []models.ImageSummary
-	for range workers {
+	for range targets {
 		r := <-ch
 		if r.err != nil {
 			log.Printf("orchestrator: list images from worker failed: %v", r.err)
