@@ -10,39 +10,28 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	swaggerfiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
 	"open-sandbox/internal/api"
 	"open-sandbox/internal/config"
 	"open-sandbox/internal/database"
-	"open-sandbox/internal/docker"
+	"open-sandbox/internal/orchestrator"
 	"open-sandbox/internal/proxy"
-
-	_ "open-sandbox/docs"
+	"open-sandbox/internal/worker"
 )
 
-// @title           Open Sandbox API
-// @version         1.0
-// @description     Docker sandbox orchestrator REST API. Create, manage, and execute commands inside isolated Docker containers.
-
-// @host      localhost:8080
-// @BasePath  /v1
-
-// @securityDefinitions.apikey  ApiKeyAuth
-// @in                          header
-// @name                        Authorization
-// @description                 Enter "Bearer {your-api-key}"
-
 func main() {
-	cfg := config.Load()
+	cfg := config.LoadOrchestrator()
 
 	db := database.New("sandbox.db")
 	repo := database.NewRepository(db)
-	dc := docker.New(docker.WithRepository(repo))
+
+	// Worker registry (loads active workers from DB).
+	registry := orchestrator.NewRegistry(repo)
+
+	// RemoteDockerClient — implements DockerClient via HTTP to workers.
+	dc := orchestrator.NewRemoteClient(registry, repo)
 
 	// --- Reverse proxy (multi-listen) ---
 	proxyServer := proxy.New(cfg.BaseDomain, repo)
-	dc.SetCacheInvalidator(proxyServer.InvalidateCache)
 	proxyHandler := proxyServer.Handler()
 
 	var proxySrvs []*http.Server
@@ -62,6 +51,7 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 
+	// Public API (same as all-in-one, but backed by RemoteDockerClient).
 	v1 := r.Group("/v1")
 	if cfg.APIKey != "" {
 		v1.Use(api.APIKeyAuth(cfg.APIKey))
@@ -71,7 +61,14 @@ func main() {
 	h.RegisterHealthCheck(r)
 	h.RegisterRoutes(v1)
 
-	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerfiles.Handler))
+	// Internal API for worker registration.
+	internal := r.Group("/internal/v1")
+	if cfg.WorkerKey != "" {
+		internal.Use(worker.APIKeyAuth(cfg.WorkerKey))
+	}
+
+	oh := orchestrator.NewHandler(registry)
+	oh.RegisterRoutes(internal)
 
 	r.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{
@@ -80,26 +77,25 @@ func main() {
 		})
 	})
 
-	// Graceful shutdown: listen for SIGINT/SIGTERM, then stop tracked containers.
+	// Graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: r}
 
 	go func() {
-		log.Printf("api listening on %s", cfg.Addr)
+		log.Printf("orchestrator API listening on %s", cfg.Addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("api listen: %v", err)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Println("shutting down: stopping tracked sandboxes...")
+	log.Println("shutting down orchestrator...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	dc.Shutdown(shutdownCtx)
 	for _, ps := range proxySrvs {
 		if err := ps.Shutdown(shutdownCtx); err != nil {
 			log.Printf("proxy shutdown %s: %v", ps.Addr, err)
@@ -109,5 +105,5 @@ func main() {
 		log.Fatalf("api shutdown: %v", err)
 	}
 
-	log.Println("server stopped")
+	log.Println("orchestrator stopped")
 }

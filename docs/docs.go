@@ -54,7 +54,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Returns all Docker images available locally.",
+                "description": "Returns all Docker images available locally. In distributed mode, use ?worker_id= to filter by worker.",
                 "produces": [
                     "application/json"
                 ],
@@ -62,6 +62,14 @@ const docTemplate = `{
                     "images"
                 ],
                 "summary": "List local images",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter images by worker ID (distributed mode only)",
+                        "name": "worker_id",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "List of images",
@@ -1391,6 +1399,10 @@ const docTemplate = `{
                 "image": {
                     "type": "string",
                     "example": "node:24"
+                },
+                "name": {
+                    "description": "pre-generated name (used by orchestrator → worker). Empty = auto-generate.",
+                    "type": "string"
                 },
                 "ports": {
                     "description": "container ports to expose, e.g. [\"3000\", \"8080/tcp\"]. First port is the default for proxy routing.",

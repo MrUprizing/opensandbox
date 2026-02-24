@@ -36,11 +36,21 @@ func (j *JSONMap) Scan(src any) error {
 
 // Sandbox persists the container ID, metadata, and its assigned host ports.
 type Sandbox struct {
-	ID    string `gorm:"primaryKey"` // Docker container ID
-	Name  string
-	Image string
-	Ports JSONMap `gorm:"type:json"` // e.g. {"3000/tcp": "32768"}
-	Port  string  // container port exposed, e.g. "3000/tcp"
+	ID       string `gorm:"primaryKey"` // Docker container ID
+	Name     string
+	Image    string
+	Ports    JSONMap `gorm:"type:json"` // e.g. {"3000/tcp": "32768"}
+	Port     string  // container port exposed, e.g. "3000/tcp"
+	WorkerID string  // FK to Worker.ID — empty in all-in-one mode
+}
+
+// Worker represents a registered worker node.
+type Worker struct {
+	ID        string `gorm:"primaryKey"`
+	URL       string `gorm:"uniqueIndex"` // e.g. "http://10.0.0.2:9090"
+	APIKey    string // API key for authenticating with this worker
+	Status    string // "active" / "inactive"
+	CreatedAt int64  // unix milliseconds
 }
 
 // Command persists an executed command's metadata and result.

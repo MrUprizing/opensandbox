@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -748,17 +749,36 @@ func (h *Handler) getImage(c *gin.Context) {
 	c.JSON(http.StatusOK, detail)
 }
 
+// WorkerImageLister is an optional interface for listing images from a specific worker.
+type WorkerImageLister interface {
+	ListImagesFromWorkers(ctx context.Context, workerID string) ([]models.ImageSummary, error)
+}
+
 // listImages handles GET /v1/images.
 // @Summary      List local images
-// @Description  Returns all Docker images available locally.
+// @Description  Returns all Docker images available locally. In distributed mode, use ?worker_id= to filter by worker.
 // @Tags         images
 // @Produce      json
+// @Param        worker_id  query     string  false  "Filter images by worker ID (distributed mode only)"
 // @Success      200  {object}  map[string]interface{}  "List of images"
 // @Failure      500  {object}  ErrorResponse
 // @Security     ApiKeyAuth
 // @Router       /images [get]
 func (h *Handler) listImages(c *gin.Context) {
-	images, err := h.docker.ListImages(c.Request.Context())
+	var images []models.ImageSummary
+	var err error
+
+	// If ?worker_id= is set and the client supports it, filter by worker.
+	if workerID := c.Query("worker_id"); workerID != "" {
+		if lister, ok := h.docker.(WorkerImageLister); ok {
+			images, err = lister.ListImagesFromWorkers(c.Request.Context(), workerID)
+		} else {
+			images, err = h.docker.ListImages(c.Request.Context())
+		}
+	} else {
+		images, err = h.docker.ListImages(c.Request.Context())
+	}
+
 	if err != nil {
 		internalError(c, err)
 		return

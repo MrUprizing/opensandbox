@@ -91,9 +91,13 @@ func generateName() string {
 	}
 }
 
-// generateUniqueName returns a name that does not collide with existing names.
+// GenerateUniqueName returns a name that does not collide with existing names.
+// If exists is nil (no DB), returns the first generated name without collision checks.
 // After 10 attempts, it appends a random 4-digit suffix.
-func generateUniqueName(exists func(string) bool) string {
+func GenerateUniqueName(exists func(string) bool) string {
+	if exists == nil {
+		return generateName()
+	}
 	for range 10 {
 		name := generateName()
 		if !exists(name) {

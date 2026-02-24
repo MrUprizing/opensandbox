@@ -72,6 +72,9 @@ definitions:
       image:
         example: node:24
         type: string
+      name:
+        description: pre-generated name (used by orchestrator → worker). Empty = auto-generate.
+        type: string
       ports:
         description: container ports to expose, e.g. ["3000", "8080/tcp"]. First port
           is the default for proxy routing.
@@ -323,7 +326,13 @@ paths:
       - system
   /images:
     get:
-      description: Returns all Docker images available locally.
+      description: Returns all Docker images available locally. In distributed mode,
+        use ?worker_id= to filter by worker.
+      parameters:
+      - description: Filter images by worker ID (distributed mode only)
+        in: query
+        name: worker_id
+        type: string
       produces:
       - application/json
       responses:
