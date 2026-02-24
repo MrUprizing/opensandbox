@@ -100,3 +100,76 @@ func (r *Repository) UpdateCommandFinished(id string, exitCode int, finishedAt i
 func (r *Repository) DeleteCommandsBySandbox(sandboxID string) error {
 	return r.db.Where("sandbox_id = ?", sandboxID).Delete(&Command{}).Error
 }
+
+// --- Worker operations ---
+
+// SaveWorker creates or updates a worker record.
+func (r *Repository) SaveWorker(w Worker) error {
+	return r.db.Save(&w).Error
+}
+
+// FindWorkerByID returns a worker by ID, or nil if not found.
+func (r *Repository) FindWorkerByID(id string) (*Worker, error) {
+	var w Worker
+	if err := r.db.First(&w, "id = ?", id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &w, nil
+}
+
+// FindWorkerByURL returns a worker by URL, or nil if not found.
+func (r *Repository) FindWorkerByURL(url string) (*Worker, error) {
+	var w Worker
+	if err := r.db.First(&w, "url = ?", url).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &w, nil
+}
+
+// FindActiveWorkers returns all workers with status "active".
+func (r *Repository) FindActiveWorkers() ([]Worker, error) {
+	var workers []Worker
+	if err := r.db.Where("status = ?", "active").Find(&workers).Error; err != nil {
+		return nil, err
+	}
+	return workers, nil
+}
+
+// DeleteWorker removes a worker record by ID.
+func (r *Repository) DeleteWorker(id string) error {
+	return r.db.Delete(&Worker{}, "id = ?", id).Error
+}
+
+// UpdateWorkerStatus changes a worker's status.
+func (r *Repository) UpdateWorkerStatus(id, status string) error {
+	return r.db.Model(&Worker{}).Where("id = ?", id).Update("status", status).Error
+}
+
+// FindSandboxWorker returns the sandbox joined with its worker URL.
+// Returns the sandbox and the worker URL, or nil if not found.
+func (r *Repository) FindSandboxWorker(sandboxID string) (*Sandbox, string, error) {
+	var sb Sandbox
+	if err := r.db.First(&sb, "id = ?", sandboxID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, "", nil
+		}
+		return nil, "", err
+	}
+	if sb.WorkerID == "" {
+		return &sb, "", nil
+	}
+	w, err := r.FindWorkerByID(sb.WorkerID)
+	if err != nil {
+		return nil, "", err
+	}
+	if w == nil {
+		return &sb, "", nil
+	}
+	return &sb, w.URL, nil
+}

@@ -60,6 +60,39 @@ func LoadWorker() *WorkerConfig {
 	}
 }
 
+// OrchestratorConfig holds configuration for the orchestrator binary.
+type OrchestratorConfig struct {
+	Addr       string   // API HTTP listen address (default ":8080")
+	APIKey     string   // Public API key
+	WorkerKey  string   // Shared key for worker ↔ orchestrator auth
+	ProxyAddrs []string // Proxy listen addresses
+	BaseDomain string   // Base domain for proxy subdomains
+}
+
+// PrimaryProxyAddr returns the first proxy address, used for generating URLs.
+func (c *OrchestratorConfig) PrimaryProxyAddr() string {
+	if len(c.ProxyAddrs) == 0 {
+		return ":80"
+	}
+	return c.ProxyAddrs[0]
+}
+
+// LoadOrchestrator parses flags and env vars for the orchestrator binary.
+func LoadOrchestrator() *OrchestratorConfig {
+	addr := flag.String("addr", envOrDefault("ADDR", ":8080"), "API HTTP listen address")
+	proxyAddr := flag.String("proxy-addr", envOrDefault("PROXY_ADDR", ":80,:3000"), "Comma-separated proxy listen addresses")
+	baseDomain := flag.String("base-domain", envOrDefault("BASE_DOMAIN", "localhost"), "Base domain for subdomain routing")
+	flag.Parse()
+
+	return &OrchestratorConfig{
+		Addr:       *addr,
+		APIKey:     os.Getenv("API_KEY"),
+		WorkerKey:  os.Getenv("WORKER_API_KEY"),
+		ProxyAddrs: parseAddrs(*proxyAddr),
+		BaseDomain: *baseDomain,
+	}
+}
+
 // parseAddrs splits a comma-separated list of addresses and trims whitespace.
 func parseAddrs(raw string) []string {
 	parts := strings.Split(raw, ",")

@@ -48,7 +48,7 @@ func TestGenerateUniqueName_SkipsExisting(t *testing.T) {
 	for range 20 {
 		taken[generateName()] = true
 	}
-	name := generateUniqueName(func(n string) bool { return taken[n] })
+	name := GenerateUniqueName(func(n string) bool { return taken[n] })
 	if taken[name] {
 		t.Fatalf("returned existing name: %q", name)
 	}
@@ -56,7 +56,7 @@ func TestGenerateUniqueName_SkipsExisting(t *testing.T) {
 
 func TestGenerateUniqueName_FallbackSuffix(t *testing.T) {
 	calls := 0
-	name := generateUniqueName(func(n string) bool {
+	name := GenerateUniqueName(func(n string) bool {
 		calls++
 		return calls <= 10
 	})

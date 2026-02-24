@@ -287,12 +287,12 @@ func (c *Client) Create(ctx context.Context, req models.CreateSandboxRequest) (m
 	name := req.Name
 	if name == "" {
 		if c.repo != nil {
-			name = generateUniqueName(func(n string) bool {
+			name = GenerateUniqueName(func(n string) bool {
 				sb, _ := c.repo.FindByName(n)
 				return sb != nil
 			})
 		} else {
-			name = generateUniqueName(nil)
+			name = GenerateUniqueName(nil)
 		}
 	}
 
