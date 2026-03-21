@@ -104,10 +104,19 @@ sudo reboot
 
 # Opensandbox
 
-Install and run Opensandbox
+Install and run Open Sandbox without cloning:
 
 ```bash
-git clone https://github.com/MrUprizing/opensandbox.git 
+curl -fsSL https://raw.githubusercontent.com/MrUprizing/opensandbox/main/scripts/install.sh | bash
+open-sandbox -addr :8080 -proxy-addr :3000 -base-domain localhost
+```
+
+Build from source (optional):
+
+```bash
+git clone https://github.com/MrUprizing/opensandbox.git
 cd opensandbox
 go run cmd/api/main.go
 ```
+
+For release/tag workflow details, see [releases.md](releases.md).
