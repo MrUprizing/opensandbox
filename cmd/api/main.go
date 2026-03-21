@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os/signal"
@@ -97,20 +98,32 @@ func main() {
 	}()
 
 	<-ctx.Done()
-	log.Println("shutting down: stopping tracked sandboxes...")
+	log.Println("shutting down: stopping incoming traffic...")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	httpShutdownCtx, cancelHTTP := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelHTTP()
 
-	dc.Shutdown(shutdownCtx)
 	for _, ps := range proxySrvs {
-		if err := ps.Shutdown(shutdownCtx); err != nil {
-			log.Printf("proxy shutdown %s: %v", ps.Addr, err)
+		if err := ps.Shutdown(httpShutdownCtx); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				log.Printf("proxy shutdown %s: timeout reached", ps.Addr)
+			} else {
+				log.Printf("proxy shutdown %s: %v", ps.Addr, err)
+			}
 		}
 	}
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("api shutdown: %v", err)
+	if err := srv.Shutdown(httpShutdownCtx); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			log.Printf("api shutdown: timeout reached")
+		} else {
+			log.Printf("api shutdown: %v", err)
+		}
 	}
+
+	log.Println("shutting down: stopping tracked sandboxes...")
+	sandboxShutdownCtx, cancelSandboxes := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancelSandboxes()
+	dc.Shutdown(sandboxShutdownCtx)
 
 	log.Println("server stopped")
 }

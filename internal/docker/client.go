@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -962,6 +963,20 @@ func (c *Client) ImageExists(ctx context.Context, image string) (bool, error) {
 // Shutdown cancels all pending timers, running commands, and stops tracked containers.
 // Called during graceful shutdown to prevent orphaned containers.
 func (c *Client) Shutdown(ctx context.Context) {
+	commandCount := 0
+	c.commands.Range(func(_, _ any) bool {
+		commandCount++
+		return true
+	})
+
+	timerCount := 0
+	c.timers.Range(func(_, _ any) bool {
+		timerCount++
+		return true
+	})
+
+	log.Printf("docker shutdown: canceling %d commands, stopping %d sandboxes", commandCount, timerCount)
+
 	// Cancel all running commands.
 	c.commands.Range(func(key, value any) bool {
 		rc := value.(*runningCommand)
@@ -975,7 +990,13 @@ func (c *Client) Shutdown(ctx context.Context) {
 		entry.timer.Stop()
 		close(entry.cancel)
 		c.timers.Delete(id)
-		c.cli.ContainerStop(ctx, id, moby.ContainerStopOptions{})
+		if _, err := c.cli.ContainerStop(ctx, id, moby.ContainerStopOptions{}); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				log.Printf("docker shutdown: stop sandbox %s timeout", id)
+			} else {
+				log.Printf("docker shutdown: stop sandbox %s: %v", id, err)
+			}
+		}
 		return true
 	})
 }
