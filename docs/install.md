@@ -17,7 +17,7 @@ curl -fsSL https://raw.githubusercontent.com/MrUprizing/opensbx/main/scripts/ins
 Run locally:
 
 ```bash
-opensbx -addr :8080 -proxy-addr :3000 -base-domain localhost
+opensbx
 ```
 
 Health check:

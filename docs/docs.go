@@ -1730,7 +1730,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/v1",
 	Schemes:          []string{},
 	Title:            "Opensbx API",
-	Description:      "Docker sandbox orchestrator REST API. Create, manage, and execute commands inside isolated Docker containers.",
+	Description:      "Lightweight sandbox API for running untrusted code in isolated environments.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

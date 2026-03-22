@@ -1,7 +1,7 @@
 {
     "swagger": "2.0",
     "info": {
-        "description": "Docker sandbox orchestrator REST API. Create, manage, and execute commands inside isolated Docker containers.",
+        "description": "Lightweight sandbox API for running untrusted code in isolated environments.",
         "title": "Opensbx API",
         "contact": {},
         "version": "1.0"

@@ -10,22 +10,22 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	swaggerfiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
 	"opensbx/internal/api"
 	"opensbx/internal/config"
 	"opensbx/internal/database"
 	"opensbx/internal/docker"
 	"opensbx/internal/proxy"
 
+	"github.com/gin-gonic/gin"
+	swaggerfiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
+
 	_ "opensbx/docs"
 )
 
 // @title           Opensbx API
 // @version         1.0
-// @description     Docker sandbox orchestrator REST API. Create, manage, and execute commands inside isolated Docker containers.
-
+// @description     Lightweight sandbox API for running untrusted code in isolated environments.
 // @host      localhost:8080
 // @BasePath  /v1
 

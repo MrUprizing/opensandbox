@@ -108,7 +108,7 @@ main() {
   fi
 
   echo "Installed: $INSTALL_DIR/$BINARY_NAME"
-  echo "Run: $BINARY_NAME -addr :8080 -proxy-addr :3000 -base-domain localhost"
+  echo "Run: $BINARY_NAME"
 }
 
 main "$@"
